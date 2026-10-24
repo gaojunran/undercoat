@@ -1,159 +1,193 @@
-# 编译流水线
+# Compilation pipeline
 
-一个样式入口文件进来，出去的是一段 CSS 字节（可选的还有 `.map`）。中间固定经过六段：
-文本装配成一份合并串、交给 oxc 解析成带位置的语法树、方言各自的求值器生成共享 IR、
-最后按方言的产物形态打印成字节。
+One style entry file goes in; CSS bytes come out (plus a `.map` when it is asked for). Six stages
+sit in between: the pieces are assembled into one merged text, `oxc-css-parser` parses it into an
+AST that carries positions, each dialect's evaluator produces the shared IR, and the printer writes
+bytes in that dialect's output shape.
 
-这篇写给要动编译器内部的人：每一段做什么、代码落在哪个符号上、哪些东西是刻意交给
-`oxc-css-parser`、哪些是本 crate 自己的语义。方言之间「为什么不共用」见
-[architecture.md](architecture.md)，文末有一张整条链路的图。
+This page is for people changing the compiler internals: what each stage does, which symbol it
+lives in, what is deliberately delegated to `oxc-css-parser` and what is this crate's own
+semantics. For why the dialects do (or refuse to) share each piece, see
+[architecture.md](architecture.md); the whole chain is drawn at the end of this page.
 
-入口是 `src/lib.rs` 的 `compile_file`：`.less` 进 less 通道，`.scss` / `.sass` / `.css` /
-`.wxss` 进 scss 通道（`.sass` 在装配期折成等义 SCSS 文本）。两条通道各有自己的装配（①）
-与解析驱动（②），共用的是 `merge` 的段表与 `doc` / `print` / `sourcemap` 这一层。
+The entry point is `compile_file` in `src/lib.rs`: `.less` goes to the less channel; `.scss` /
+`.sass` / `.css` / `.wxss` go to the scss channel (`.sass` is folded into equivalent SCSS text
+during assembly). Each channel has its own assembly (①) and parse driver (②); what they share is
+the segment table in `merge` and the `doc` / `print` / `sourcemap` layer.
 
-## 六段的边界
+## Stage boundaries
 
-| 阶段 | 做什么 | 代码位置 |
+| Stage | What it does | Code |
 | --- | --- | --- |
-| ① 装配 | `@import` / `@use` / `@forward` 解析、候选枚举、文本内联；把 `.sass` 缩进语法折成等义 SCSS。所有片段拼成**一份合并串**，同时按片段记下段表（输出区间对应到哪个文件的哪个偏移） | `scss/imports.rs`、`scss/indented.rs`、`less/imports.rs`、`merge.rs` |
-| ② 解析 | 只做词法与语法，产出带 `Span`（字节区间）的 AST | `scss/mod.rs`、`less/mod.rs` |
-| ③ 求值 | less：边遍历边求值，产出 IR；scss：求值成带类型的 `Value` 再生成 IR | `less/eval.rs`、`scss/eval.rs` |
-| ④ IR | 两个方言共用的输出中间表示：`Rule` / `AtRule` / `Decl` / `Comment` / `Keyframe`，每个节点带源锚点 | `doc.rs` |
-| ⑤ 打印 | 按 `Style` 写字节并记 sourcemap 映射；两种方言的形态差异全部收敛在 `Style` | `doc.rs`、`print.rs` |
-| ⑥ sourcemap | 把打印时记下的 `(输出偏移, 源 Span)` 换回文件与行列，VLQ 编码 | `sourcemap.rs`、`merge.rs`、`lib.rs` |
+| ① Assembly | Resolves `@import` / `@use` / `@forward`, enumerates candidates, inlines text; folds the `.sass` indented syntax into equivalent SCSS. Every piece is concatenated into **one merged text**, and a segment table records which file and offset each output range came from | `scss/imports.rs`, `scss/indented.rs`, `less/imports.rs`, `merge.rs` |
+| ② Parse | Lexing and parsing only; yields an AST whose nodes carry `Span` (byte ranges) | `scss/mod.rs`, `less/mod.rs` |
+| ③ Evaluate | less: evaluate while walking the tree, emitting IR; scss: evaluate into typed `Value`s, then emit IR | `less/eval.rs`, `scss/eval.rs` |
+| ④ IR | The output IR shared by both dialects: `Rule` / `AtRule` / `Decl` / `Comment` / `Keyframe`, each node carrying a source span | `doc.rs` |
+| ⑤ Print | Writes bytes according to `Style` and records source map entries; every shape difference between the dialects is confined to `Style` | `doc.rs`, `print.rs` |
+| ⑥ Source map | Turns the recorded `(output offset, source span)` pairs back into a file and line/column, then VLQ-encodes them | `sourcemap.rs`, `merge.rs`, `lib.rs` |
 
-下面以 `a.scss` 为例走一遍；less 同构，差异点单独标出。
+The walkthrough below follows `a.scss`; less is isomorphic, with the differences called out.
 
-## 1. 装配（`scss::imports::Loader`）
+## 1. Assembly (`scss::imports::Loader`)
 
-这一阶段**还不碰 AST**，全是文本与路径操作：
+Nothing here touches the AST yet; it is all text and path work:
 
-- `@import`：按 dart 的候选枚举找文件（`_partial` 前缀、目录 index、`.scss/.sass/.css` 后缀），递归内联；
-- `@use` / `@forward`：每个模块只装载一次，把模块内容**排到依赖者之前**，同时登记 `ModuleInfo { file, scope }`；模块不共享作用域，靠 scope 编号隔离；
-- `.sass` 缩进语法在这里折成等义 SCSS（`scss/indented.rs`）；
-- 所有片段拼成一份**合并串** `Merged.text`，每段同时记一条 `Seg { start, end, file, orig }`。
+- `@import`: finds the file through dart's candidate enumeration (`_partial` prefix, directory index, `.scss/.sass/.css` suffixes) and inlines it recursively;
+- `@use` / `@forward`: each module is loaded once, its contents are placed **before** the dependent, and a `ModuleInfo { file, scope }` is registered; modules do not share scope, they are kept apart by scope number;
+- the `.sass` indented syntax is folded into equivalent SCSS here (`scss/indented.rs`);
+- all pieces are concatenated into one **merged text**, `Merged.text`, and each piece records a `Seg { start, end, file, orig }`.
 
-**代码位置**：`src/scss/mod.rs` 的 `compile` 调用 `Loader::new(...).run()`（`src/scss/imports.rs`
-的 `Loader`，返回 `Loaded { merged, deps, modules, scopes, scope_of }`）；缩进语法走
-`indented::to_scss`；合并串与段表是 `src/merge.rs` 的 `Merged` / `Seg`，片段靠
-`Merged::append_part` 追加。less 侧对应 `src/less/mod.rs` 的 `compile` 调
-`less::imports::expand_imports`。
+**Code**: `compile` in `src/scss/mod.rs` calls `Loader::new(...).run()` (the `Loader` in
+`src/scss/imports.rs`, which returns `Loaded { merged, deps, modules, scopes, scope_of }`); the
+indented syntax goes through `indented::to_scss`; the merged text and the segment table are
+`Merged` / `Seg` in `src/merge.rs`, and pieces are appended by `Merged::append_part`. On the less
+side, `compile` in `src/less/mod.rs` calls `less::imports::expand_imports`.
 
-为什么用合并串而不是「每个文件一棵 AST」：`@import` 的语义就是文本级搬移（共享作用域、嵌套位置不变），splice 之后后面所有阶段都只需要一套偏移坐标；出错时用段表把合并串偏移换回「哪个文件第几行」。
+Why one merged text rather than one AST per file: `@import` is textual relocation by definition
+(shared scope, nested position preserved), so after the splice every later stage needs only one
+coordinate system; on error the segment table maps a merged-text offset back to "which file,
+which line".
 
-## 2. 解析（oxc-css-parser）
+## 2. Parse (oxc-css-parser)
 
 ```rust
 let alloc = Allocator::default();
 let mut parser = ParserBuilder::new(&alloc, merged.text.as_str())
-    .syntax(Syntax::Scss)      // less 通道：Syntax::Less
-    .comments()                // 额外保留块注释的位置与内容
+    .syntax(Syntax::Scss)      // less channel: Syntax::Less
+    .comments()                // also keep block comments: position and content
     .build();
-let ast = parser.parse::<Stylesheet>()?;   // oxc 的 AST，节点带 oxc_css_parser::pos::Span
+let ast = parser.parse::<Stylesheet>()?;   // oxc AST, nodes carry oxc_css_parser::pos::Span
 ```
 
-oxc 在这里只承担**词法 + 语法**两件事，产出带 `Span`（字节区间）的 AST。我们不用它的 visitor、不用它的 printer、也从不把它的 AST 直接序列化。两个方言的 `Syntax` 都是它支持的（`Syntax::Less` / `Syntax::Scss`），所以两条通道共用同一个解析器版本，升级只动一处依赖。
+oxc does exactly two things here — **lexing and parsing** — and hands back an AST whose nodes
+carry `Span` (byte ranges). We do not use its visitor, we do not use its printer, and we never
+serialize its AST directly. Both dialects' `Syntax` values are supported by it (`Syntax::Less` /
+`Syntax::Scss`), so the two channels share one parser version and an upgrade touches a single
+dependency.
 
-解析错误发生在合并串坐标上，所以报错要先过段表：`merged.locate_exact(span.start)` 先拿到「文件 + 文件内偏移」，再经 `position_in(file, local)` 换成「文件 + 行列」。
+Parse errors surface in merged-text coordinates, so reporting one has to go through the segment
+table first: `merged.locate_exact(span.start)` yields the file plus an offset into that file, and
+`position_in(file, local)` turns that into file and line/column.
 
-**代码位置**：`src/scss/mod.rs` 的 `compile`（`.syntax(Syntax::Scss)`）与 `src/less/mod.rs`
-的 `compile`（`.syntax(Syntax::Less)`）。报错换算在 `src/merge.rs` 的 `Merged::locate_exact`
-与 `Merged::position_in`；less 通道在 `compile` 里显式走这两步，scss 通道把它收进
-`Merged::error_at`。
+**Code**: `compile` in `src/scss/mod.rs` (`.syntax(Syntax::Scss)`) and `compile` in
+`src/less/mod.rs` (`.syntax(Syntax::Less)`). The error mapping lives in `Merged::locate_exact` and
+`Merged::position_in` in `src/merge.rs`; the less channel calls both explicitly inside `compile`,
+while the scss channel wraps them in `Merged::error_at`.
 
-## 3. 求值（方言分开的最后一块）
+## 3. Evaluate (the last place the dialects part)
 
-两条通道从这里开始分叉——**这是整条链路上唯一真正方言相关的地方**：
+The two channels fork here — **this is the only genuinely dialect-specific place in the whole
+chain**:
 
-- **scss**（`scss::Converter` 遍历 `ast.statements`）：
-  - `decls.rs`：变量声明、嵌套属性、自定义属性；
-  - `flow.rs`：`@mixin`/`@include`/`@content`/`@if`/`@each`/`@for`/`@while`，帧栈与作用域在这里；
-  - `eval.rs` + `value.rs` + `builtins.rs` + `modules.rs`：带类型的 SassScript 值（数字带复合单位、颜色全程 f64 只在序列化取整、列表/映射/字符串）、内置函数与内置模块成员表；
-  - `selector.rs`：嵌套展开（`&` 解析、`@at-root`）、`@extend` 的选择器合并；
-  - `prelude.rs`：`@media`/`@supports` 的嵌套合并与变量替换；
-  - `module_use.rs`：命名空间成员解析、`@forward` 惰性转发边、`@use … with` 配置。
-- **less**（`less::Compiler` 遍历语句，边遍历边求值）：
-  - `env.rs` 维护帧/作用域与惰性绑定；`eval.rs` 做 mixin 展开、guard、`@each`、变量求值；
-  - `value.rs` 是「CSS 文本 + 惰性绑定」模型，算术按 less 的 8 位精度；
-  - `guard.rs`、`file_fn.rs`（`data-uri`/`svg-gradient` 等）、`extend.rs`（`&:extend()`）。
+- **scss** (`scss::Converter` walks `ast.statements`):
+  - `decls.rs`: variable declarations, nested properties, custom properties;
+  - `flow.rs`: `@mixin`/`@include`/`@content`/`@if`/`@each`/`@for`/`@while`; the frame stack and scopes live here;
+  - `eval.rs` + `value.rs` + `builtins.rs` + `modules.rs`: typed SassScript values (numbers with compound units, colors kept as f64 and rounded only at serialization, lists/maps/strings), built-in functions and the built-in module member table;
+  - `selector.rs`: nested selector expansion (`&` resolution, `@at-root`) and `@extend` selector merging;
+  - `prelude.rs`: nested merging and variable substitution for `@media`/`@supports`;
+  - `module_use.rs`: namespace member resolution, `@forward` lazy forwarding edges, `@use … with` configuration.
+- **less** (`less::Compiler` walks the statements, evaluating as it goes):
+  - `env.rs` keeps frames/scopes and lazy bindings; `eval.rs` handles mixin expansion, guards, `@each`, variable evaluation;
+  - `value.rs` implements the "CSS text + lazy bindings" model, with arithmetic in less's 8-digit precision;
+  - `guard.rs`, `file_fn.rs` (`data-uri`/`svg-gradient` and friends), `extend.rs` (`&:extend()`).
 
-求值阶段的输出统一是 `Vec<doc::Item>`——**不是字符串**。早期 less 是「边求值边写缓冲区」，导致 `@extend` 只能事后回头改已输出的文本；现在两边都先建 IR，`@extend` 直接改 IR 里的选择器，打印器也不需要「改写已写字节」这类接口。
+Both evaluators output `Vec<doc::Item>` — **not a string**. Early less evaluated and wrote into a
+buffer as it went, which left `@extend` no option but to go back and patch text that had already
+been emitted; now both sides build the IR first, `@extend` edits selectors inside the IR, and the
+printer needs no "rewrite bytes already written" interface.
 
-**代码位置**：scss 是 `src/scss/mod.rs` 的 `Converter`；less 是 `src/less/mod.rs` 的
-`Compiler`。上面列的 `decls.rs` / `flow.rs` / `value.rs` … 都在 `src/scss/` 与 `src/less/` 下。
+**Code**: `Converter` in `src/scss/mod.rs`; `Compiler` in `src/less/mod.rs`. The `decls.rs` /
+`flow.rs` / `value.rs` … listed above all live under `src/scss/` and `src/less/`.
 
-## 4. IR（`doc.rs`）
+## 4. IR (`doc.rs`)
 
 ```text
 Item   = Rule | Keyframe | AtRule | Comment | Raw
 Body   = Rules(Vec<Item>) | Decls(Vec<DeclItem>)
-DeclItem = Decl | Comment | AtRule(无块)
+DeclItem = Decl | Comment | AtRule(no block)
 ```
 
-每个节点带源 `Span`；`Rule.selector` 是 `SelectorLines`——**按输出行拆开**的 `(行文本, Span)` 列表。拆行的唯一原因是 sourcemap：dart 把多行选择器列表的每一行都映射到列表起点，不拆行就只能给第一行打点（这一条修完 bootstrap5 的 252 处映射缺口才归零）。
+Every node carries its source `Span`; `Rule.selector` is `SelectorLines` — a list of `(line text,
+Span)` pairs **split by output line**. The only reason to split is the source map: dart maps every
+line of a multi-line selector list to the start of the list, so without splitting you can only emit
+a mapping for the first line (fixing this is what brought bootstrap5's 252 missing mappings down to
+zero).
 
-`Item::Raw` 是逃生舱，只有四类「本来就是任意 CSS 文本」的东西走它：`@import (inline)` 的文件内容、less 的子编译产物、`e("…")` 内文、`(reference)` 的紧凑声明体。
+`Item::Raw` is the escape hatch, taken only by the four things that are "arbitrary CSS text" to
+begin with: the contents of an `@import (inline)` file, a less sub-compilation's output, the body of
+`e("…")`, and the compact declaration body of `(reference)`.
 
-**代码位置**：`src/doc.rs` 的 `Item` / `Body` / `DeclItem` / `Rule` / `Raw`；`SelectorLines`
-是 `Vec<(String, Span)>` 的类型别名，拆行函数是同文件的 `selector_lines`。`Style` 定义在
-`src/doc.rs` 顶部（`Style::SASS` / `Style::LESS` 两个常量）。
+**Code**: `Item` / `Body` / `DeclItem` / `Rule` / `Raw` in `src/doc.rs`; `SelectorLines` is a type
+alias for `Vec<(String, Span)>` and `selector_lines` in the same file does the splitting. `Style`
+is defined at the top of `src/doc.rs` (the constants `Style::SASS` and `Style::LESS`).
 
-## 5. 打印（`doc::print` 调 `print::Printer`）
+## 5. Print (`doc::print` drives `print::Printer`)
 
 ```rust
 let (css, map) = print(&items, &Style::SASS, entry, &merged, opts);
 ```
 
-打印器是**只追加**的：每个来自源码的 token 走 `Printer::token(text, span)`（记一条 `Pending { offset, file, span }`），缩进/换行/逗号这类生成物走 `Printer::raw`。因为「能不能反查原始位置」由打印时是否带 span 决定，事后不需要再补映射，也不可能出现「改了已写字节但映射没跟着改」。
+The printer is **append-only**: every token that comes from source goes through
+`Printer::token(text, span)` (recording a `Pending { offset, file, span }`), while indentation,
+newlines and commas are generated through `Printer::raw`. Whether a position can be traced back is
+decided by whether a span was passed at print time, so nothing has to be filled in afterwards, and
+"bytes were rewritten but the mapping was not" cannot happen.
 
-`Style` 是两条通道在产出层唯一允许不一致的地方（6 个字段：`blank_line_after_rule` /
-`indent_selector_continuation` / `charset` / `trailing_newline` / `sources_content` /
-`verbatim_comments`，逐个取值见 architecture.md）。
+`Style` is the only place where the two channels are allowed to differ at the output layer (6
+fields: `blank_line_after_rule` / `indent_selector_continuation` / `charset` / `trailing_newline` /
+`sources_content` / `verbatim_comments`; see architecture.md for the values).
 
-**代码位置**：`src/doc.rs` 的 `print` 与 `emit_item` / `emit_items` / `emit_selector`；
-`src/print.rs` 的 `Printer`（`token` / `token_in` / `raw` / `newline` / `indent` / `finish`）
-与私有的 `Pending`。
+**Code**: `print` plus `emit_item` / `emit_items` / `emit_selector` in `src/doc.rs`; `Printer` in
+`src/print.rs` (`token` / `token_in` / `raw` / `newline` / `indent` / `finish`) and the private
+`Pending`.
 
-## 6. sourcemap（`sourcemap.rs`）
+## 6. Source map (`sourcemap.rs`)
 
-打印结束后，`Printer` 手里是 `(输出字节偏移, 源文件, 源 Span)` 的列表；逐条用 `merge` 的段表换回「文件 + 原始偏移」，再用该文件的 `LineIndex` 换算行列（列为 UTF-16），最后 VLQ 编码成 `mappings`。`sourcesContent` 是否输出由 `Style::sources_content` 决定（less 单源不写、多源写；dart 恒写）。
+Once printing is done, `Printer` holds a list of `(output byte offset, source file, source Span)`.
+Each entry is mapped back to a file and an original offset through `merge`'s segment table, then
+converted to line/column with that file's `LineIndex` (columns are UTF-16), and finally VLQ-encoded
+into `mappings`. Whether `sourcesContent` is emitted is decided by `Style::sources_content` (less:
+not for a single source, yes for several; dart: always).
 
-**代码位置**：`src/print.rs` 的 `Printer::finish`（`locate` 查段表）；`src/sourcemap.rs` 的
-`vlq` / `encode_mappings` / `to_json`；`src/lib.rs` 的 `LineIndex::line_col`（列为 UTF-16）。
+**Code**: `Printer::finish` in `src/print.rs` (`locate` consults the segment table); `vlq` /
+`encode_mappings` / `to_json` in `src/sourcemap.rs`; `LineIndex::line_col` in `src/lib.rs` (UTF-16
+columns).
 
-## oxc 的边界（刻意不越界）
+## Where oxc stops (deliberately)
 
-| 用了 | 没用（以及为什么） |
+| Used | Not used (and why) |
 | --- | --- |
-| `ParserBuilder` + `Syntax::{Less,Scss}` | 不用它的 printer：产物形态要逐字节对齐 lessc / dart-sass，必须自己控制缩进、空行、`@charset`、选择器续行 |
-| `Span`（字节区间，所有节点都带） | 不用它的 visitor：求值要控制帧栈、模块 scope、`@extend` 顺序，遍历顺序是我们的语义 |
-| `parser.comments()`（块注释的内容与位置） | 不把 AST 直接当 IR：AST 是「语法形状」，IR 是「产物形状」，中间隔着求值 |
+| `ParserBuilder` + `Syntax::{Less,Scss}` | Its printer: the output has to match lessc / dart-sass byte for byte, so indentation, blank lines, `@charset` and selector continuation are ours to control |
+| `Span` (byte ranges, on every node) | Its visitor: evaluation has to control the frame stack, module scope and `@extend` ordering — traversal order is part of our semantics |
+| `parser.comments()` (content and position of block comments) | The AST as IR: the AST is "syntactic shape", the IR is "output shape", and evaluation sits in between |
 
-一句话：**oxc 负责把文本变成带位置的语法树，剩下的一切（装配、求值、形态、sourcemap）都是本 crate 的语义**。
+The short version: **oxc turns text into a positioned syntax tree; everything else — assembly,
+evaluation, output shape, source maps — is this crate's semantics**.
 
-## 现状
+## Current size
 
-公共层小而稳定，体量几乎都在两个方言的求值上：
+The shared layer is small and stable; almost all of the volume is the two dialect evaluators:
 
-| 部分 | 行数 |
+| Part | Lines |
 | --- | --- |
-| `src/lib.rs`（入口分流、`Options` / `Output`、`LineIndex`） | 104 |
-| `src/merge.rs`（合并串 `Merged` + 段表 `Seg`） | 331 |
-| `src/doc.rs`（IR、`Style`、打印） | 841 |
-| `src/print.rs`（只追加的字节写入器） | 253 |
-| `src/sourcemap.rs`（VLQ / `sourcesContent`） | 168 |
-| `src/less/*`（less 前端） | 9981 |
-| `src/scss/*`（scss 前端） | 18261 |
+| `src/lib.rs` (dispatch, `Options` / `Output`, `LineIndex`) | 104 |
+| `src/merge.rs` (merged text `Merged` + segment table `Seg`) | 331 |
+| `src/doc.rs` (IR, `Style`, printing) | 841 |
+| `src/print.rs` (append-only byte writer) | 253 |
+| `src/sourcemap.rs` (VLQ / `sourcesContent`) | 168 |
+| `src/less/*` (less front end) | 9981 |
+| `src/scss/*` (scss front end) | 18261 |
 
-加上 `src/error.rs`（44 行）与 `src/text.rs`（176 行），`src/` 共 30159 行（不含 `src/bin` 的 CLI）。
+Add `src/error.rs` (44 lines) and `src/text.rs` (176 lines) and `src/` totals 30159 lines (not
+counting the CLI under `src/bin`).
 
-对外只有四个产品符号：`compile_file` / `Options` / `Output` / `CompileError`
-（`LessOptions` 是 `Options::less` 的字段类型；`LineIndex` 与 `scss` 模块是 `#[doc(hidden)]`
-的测试钩子）。也就是说，上面六个阶段全部是内部实现，换掉任何一段都不影响调用方。
+Only four product symbols are public: `compile_file` / `Options` / `Output` / `CompileError`
+(`LessOptions` is the type of the `Options::less` field; `LineIndex` and the `scss` module are
+`#[doc(hidden)]` test hooks). In other words, all six stages above are internal: any of them can be
+replaced without touching callers.
 
-## 链路图
+## Diagram
 
-主干是两条方言共用的部分，只有 ③ 处分叉再汇合：
+The trunk is what both dialects share; only stage ③ forks and merges again:
 
-![编译流水线](img/pipeline.svg)
+![Compilation pipeline](img/pipeline.svg)
