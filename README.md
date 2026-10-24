@@ -1,5 +1,9 @@
 # undercoat
 
+[![ci](https://github.com/gaojunran/undercoat/actions/workflows/ci.yml/badge.svg)](https://github.com/gaojunran/undercoat/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/undercoat.svg)](https://crates.io/crates/undercoat)
+[![docs.rs](https://docs.rs/undercoat/badge.svg)](https://docs.rs/undercoat)
+
 A native Rust CSS preprocessor. One engine compiles both **Less** and **Sass/SCSS**,
 and its output is byte-compatible with the reference implementations — no Node runtime.
 
