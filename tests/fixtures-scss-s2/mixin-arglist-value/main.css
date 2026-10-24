@@ -1,0 +1,11 @@
+.a {
+  pair: 2px;
+  inspected: (2px,);
+  head: 1px;
+}
+
+.b {
+  pair: 2px, 3px;
+  inspected: 2px, 3px;
+  head: 1px;
+}

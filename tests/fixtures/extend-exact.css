@@ -1,0 +1,22 @@
+.button,
+.primary {
+  padding: 4px;
+}
+.button:hover,
+.primary-hover {
+  padding: 6px;
+}
+.button .icon,
+.group-b {
+  margin: 0;
+}
+.primary {
+  background: blue;
+}
+.primary-hover {
+  background: navy;
+}
+.group-a,
+.group-b {
+  color: red;
+}

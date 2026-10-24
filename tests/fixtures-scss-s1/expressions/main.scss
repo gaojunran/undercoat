@@ -1,0 +1,27 @@
+$list: 1 2, 3 4;
+$map: (key: 10px, other: 2);
+
+.types {
+  number: 10px;
+  color-literal: rebeccapurple;
+  hex: #ABCDEF;
+  string: "quoted";
+  bool: true;
+  nil: null;
+  null-in-list: 1 null 2;
+  list-space: 1px 2px;
+  list-comma: (1px, 2px);
+  list-bracket: [1px 2px];
+  map-get: map-get($map, key);
+  map-len: length($map);
+  concat-string: "a" + "b";
+  concat-number: 1 + "x";
+  comparison: 1 < 2;
+  equal: "a" == a;
+  truthy-zero: not 0;
+  truthy-empty: not "";
+  truthy-null: not null;
+  and-or: false or 42;
+  unknown-fn: sqrt(2);
+  passthrough: mystery(1, 2, 3);
+}

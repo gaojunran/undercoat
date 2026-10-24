@@ -1,0 +1,24 @@
+.a {
+  background-color: #fff;
+  background-size: 40rpx 40rpx;
+}
+
+.b {
+  margin: 3px;
+  margin-left: 4px;
+}
+
+.c {
+  font-family: serif;
+  font-style-italic: yes;
+  font-weight: bold;
+}
+
+.d {
+  background-color: #fff;
+}
+
+.e {
+  border: 1px solid;
+  border-color: red;
+}

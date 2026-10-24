@@ -1,0 +1,26 @@
+@mixin themed {
+  $prefix: mixin;
+  .item {
+    @content;
+  }
+  after: $prefix;
+}
+
+.a {
+  $prefix: caller;
+  @include themed {
+    name: $prefix;
+  }
+}
+
+@mixin twice {
+  @content;
+  @content;
+}
+
+.b {
+  $n: 1;
+  @include twice {
+    n: $n;
+  }
+}

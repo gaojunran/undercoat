@@ -1,0 +1,13 @@
+.card {
+  padding: 16px;
+  margin: 8px;
+  ordered: 1 2 9;
+  keyed: 3 4 5;
+  mapped: (a: 3, b: 6);
+  nested: 8;
+  picked: #676767;
+  labelled: "value-7";
+  merged: (k: 1, j: 2);
+  length-3: 3;
+  interpolated: "computed: 3px";
+}

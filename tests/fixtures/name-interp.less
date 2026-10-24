@@ -1,0 +1,48 @@
+// 定义侧名字插值、选择器插值、转义标识符匹配、参数驱动选择器
+@name: foo;
+@num: 3;
+
+.@{name} {
+  a: 1;
+}
+#@{name} {
+  a: 2;
+}
+.@{name}-@{num} {
+  a: 3;
+}
+
+.interpolated-calls {
+  .foo();
+  #foo();
+}
+
+// CSS 转义标识符按原文匹配
+.\123 {
+  b: 4;
+}
+.escaped-call {
+  .\123();
+}
+
+.Person(@n, @g) {
+  .@{n} {
+    @gender: @g;
+    .sayGender() {
+      gender: @gender;
+    }
+  }
+}
+.person-holder {
+  .Person(person, "Male");
+  .person.sayGender();
+}
+
+// 循环里用插值产出选择器
+.gen(@i) when (@i > 0) {
+  .w@{i} {
+    width: @i * 5px;
+  }
+  .gen(@i - 1);
+}
+.gen(3);

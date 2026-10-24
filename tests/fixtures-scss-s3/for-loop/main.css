@@ -1,0 +1,55 @@
+.through-1 {
+  n: 1;
+}
+
+.through-2 {
+  n: 2;
+}
+
+.through-3 {
+  n: 3;
+}
+
+.to-1 {
+  n: 1;
+}
+
+.to-2 {
+  n: 2;
+}
+
+.down-3 {
+  n: 3;
+}
+
+.down-2 {
+  n: 2;
+}
+
+.down-1 {
+  n: 1;
+}
+
+.neg--1 {
+  n: -1;
+}
+
+.neg-0 {
+  n: 0;
+}
+
+.neg-1 {
+  n: 1;
+}
+
+.even-2 {
+  total: 30;
+}
+
+.even-4 {
+  total: 100;
+}
+
+.final {
+  total: 100;
+}

@@ -1,0 +1,19 @@
+@media (min-width: 768px) {
+  .a {
+    display: flex;
+  }
+}
+.a {
+  width: 100%;
+}
+
+@media (min-width: 400px) {
+  .b {
+    width: 100%;
+  }
+}
+@media (min-width: 400px) and (min-width: 768px) {
+  .b {
+    display: flex;
+  }
+}

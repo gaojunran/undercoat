@@ -1,0 +1,22 @@
+.class {
+  border: 1px !important;
+  boxer: 1 !important;
+  border-width: 2 !important;
+}
+.class .inner {
+  test: 1 !important;
+}
+.nested-important {
+  width: auto !important;
+}
+.nested-important-arg {
+  width: 10px !important;
+}
+.plain {
+  border: 1px;
+  boxer: 1;
+  border-width: 2;
+}
+.plain .inner {
+  test: 1;
+}

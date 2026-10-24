@@ -1,0 +1,9 @@
+@mixin font-src($name) {
+  font-family: $name;
+  font-style: normal;
+}
+
+@font-face {
+  @include font-src("Inter");
+  src: url("inter.woff2");
+}

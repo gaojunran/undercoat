@@ -1,0 +1,44 @@
+.trig {
+  sin-deg: sin(30deg);
+  cos-deg: cos(60deg);
+  tan-deg: tan(45deg);
+  sin-rad: sin(1rad);
+  sin-grad: sin(100grad);
+  sin-turn: sin(0.25turn);
+  asin: asin(0.5);
+  acos: acos(1);
+  atan: atan(1);
+  sin-plain: sin(1);
+}
+.number {
+  pi: pi();
+  pow: pow(2, 10);
+  pow-unit: pow(2px, 2);
+  sqrt: sqrt(25px);
+  mod: mod(7px, 3);
+  mod-frac: mod(5, 2);
+}
+.extremes {
+  min-number: min(3, 1, 2);
+  max-number: max(3, 1, 2);
+  min-unit: min(3px, 1px);
+  max-unit: max(1cm, 5mm);
+  min-uncomparable: min(1px, 2em);
+  min-list: min(3px 1px 2px);
+}
+.rounding {
+  ceil: ceil(4.2px);
+  floor: floor(4.8px);
+  round: round(4.5px);
+  round-precision: round(1.23456, 2);
+  round-precision-zero: round(1.6, 0);
+  abs: abs(-2.5em);
+}
+.units {
+  unit-strip: unit(5px);
+  unit-set: unit(5, em);
+  get-unit: get-unit(5rem);
+  convert: convert(1cm, mm);
+  convert-angle: convert(180deg, rad);
+  percentage: percentage(0.5);
+}

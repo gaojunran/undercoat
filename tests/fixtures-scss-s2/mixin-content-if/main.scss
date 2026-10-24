@@ -1,0 +1,12 @@
+@mixin maybe($cond) {
+  @if $cond {
+    .inside {
+      @content;
+    }
+  } @else {
+    empty: yes;
+  }
+}
+
+.a { @include maybe(true) { color: red; } }
+.b { @include maybe(false) { color: blue; } }

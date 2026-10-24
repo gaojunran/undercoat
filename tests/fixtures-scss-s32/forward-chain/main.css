@@ -1,0 +1,11 @@
+.ns {
+  v: a-value;
+  m: a-mixin;
+  f: a-fn;
+}
+
+.star {
+  v: a-value;
+  m: a-mixin;
+  f: a-fn;
+}

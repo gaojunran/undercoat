@@ -1,0 +1,5 @@
+{
+ "message": "Only 2 arguments allowed, but 3 were passed.",
+ "line": 6,
+ "column": 2
+}

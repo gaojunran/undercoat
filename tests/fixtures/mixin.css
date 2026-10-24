@@ -1,0 +1,9 @@
+.ellipsis {
+  white-space: nowrap;
+  overflow: hidden;
+}
+.a {
+  white-space: nowrap;
+  overflow: hidden;
+  color: red;
+}

@@ -1,0 +1,21 @@
+.a {
+  /* note
+  	transform: none; */
+  x: 1;
+}
+
+/* .goods-price{
+
+} */
+.b {
+  /* one
+      two
+  three */
+  y: 2;
+}
+
+.c .d {
+  /* deep
+      more */
+  z: 3;
+}

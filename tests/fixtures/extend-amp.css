@@ -1,0 +1,24 @@
+.base,
+.wrap,
+.list,
+.grid,
+.card .card-title,
+.applied {
+  display: block;
+}
+.wrap {
+  margin: 0;
+}
+.list,
+.grid {
+  padding: 0;
+}
+.card {
+  color: gray;
+}
+.card .card-title {
+  font-weight: bold;
+}
+.applied {
+  border: 1px;
+}

@@ -1,0 +1,23 @@
+.onTop {
+  animation: "textscale";
+}
+@font-face {
+  font-family: something;
+  src: made-up-url;
+}
+@keyframes "textscale" {
+  0% {
+    font-size: 1em;
+  }
+  100% {
+    font-size: 2em;
+  }
+}
+@media (min-width: 700px) {
+  /* kept */
+}
+@supports (display: grid) {
+  .grid {
+    display: grid;
+  }
+}

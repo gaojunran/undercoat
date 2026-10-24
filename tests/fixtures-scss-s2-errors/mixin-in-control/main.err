@@ -1,0 +1,5 @@
+{
+ "message": "Mixins may not be declared in control directives.",
+ "line": 2,
+ "column": 2
+}

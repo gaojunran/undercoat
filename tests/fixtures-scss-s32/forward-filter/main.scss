@@ -1,0 +1,4 @@
+@use "show" as s;
+@use "hide" as h;
+.s { a: s.$a; @include s.keep; f: s.keep-fn() }
+.h { a: h.$a; @include h.keep; f: h.keep-fn() }

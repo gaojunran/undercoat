@@ -1,0 +1,14 @@
+\31 23 {
+  color: red;
+}
+.\@media {
+  width: 1px;
+}
+.a {
+  content: "\@";
+  grid-template-columns: 1fr \32 fr;
+}
+/* anything to unquote */
+.icon-\e001:before {
+  content: "\e001";
+}

@@ -1,0 +1,15 @@
+.rest-only {
+  all: 1 2 3;
+}
+.rest-mixed {
+  first: 1;
+  others: 2 3;
+}
+.arguments {
+  all: 10px 20px;
+  first: 10px;
+}
+.computed {
+  width: 10px;
+  content: "size=5px";
+}

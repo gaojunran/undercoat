@@ -1,0 +1,43 @@
+// 参数机制：位置参、命名参、默认值、`;` 分隔多参
+.mixin(@a: 1px, @b: 50%) {
+  width: (@a * 5);
+  height: (@b - 1%);
+  args: @arguments;
+}
+
+.named-arg {
+  color: blue;
+  .mixin(@b: 100%);
+}
+
+.local {
+  @var: 20%;
+  .mixin(@b: @var);
+}
+
+.all-args-wrong-args {
+  .mixin(@b: 10%, @a: 2px);
+}
+
+.positional {
+  .mixin(2px, 30%);
+}
+
+.semicolons(@a; @b) {
+  a: @a;
+  b: @b;
+  raw: @arguments;
+}
+
+.semi {
+  .semicolons(1; 2);
+}
+
+.semi-comma(@a; @b) {
+  a: @a;
+  b: @b;
+}
+
+.semi-with-commas {
+  .semi-comma(1, 2; 3, 4);
+}

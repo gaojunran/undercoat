@@ -1,0 +1,15 @@
+.bar .d.a,
+.bar .b,
+.c.bar:hover,
+.bar baz {
+  color: blue;
+}
+input[class="text"],
+input.text {
+  background: red;
+}
+.plain {
+  color: white ;
+  margin: 0 ;
+  e: foo bar  ;
+}

@@ -1,0 +1,10 @@
+.a {
+  box-shadow: 0 0 1px red, 0 0 2px blue;
+}
+.b {
+  transform: scale(1) rotate(2deg);
+}
+.c {
+  box-shadow: a, b;
+  color: red;
+}

@@ -1,0 +1,27 @@
+.light {
+  color: green;
+}
+.multiple {
+  color: red;
+}
+.inheritance .test-rule {
+  color: black;
+}
+.inheritance:hover {
+  color: pink;
+}
+.dont-split-me-up {
+  width: 1px;
+  color: red;
+  height: 1px;
+}
+* .dont-split-me-up {
+  sibling: true;
+}
+.clsWithGuard {
+  display: none;
+}
+.scope-check {
+  sub-prop: 2px;
+  prop: 1px;
+}

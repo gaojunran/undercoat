@@ -1,0 +1,6 @@
+@use "theme";
+
+.consumer {
+  color: theme.$brand;
+  padding: theme.$gap;
+}

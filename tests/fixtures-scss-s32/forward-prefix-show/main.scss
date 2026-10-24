@@ -1,0 +1,2 @@
+@use "fwd" as f;
+.z { x: f.$p-x }

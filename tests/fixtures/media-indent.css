@@ -1,0 +1,13 @@
+@media print {
+  *,
+  *:before,
+  *:after {
+    color: #000;
+  }
+}
+@media screen {
+  .x,
+  .y {
+    a: 1;
+  }
+}

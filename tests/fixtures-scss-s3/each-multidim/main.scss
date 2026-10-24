@@ -1,0 +1,36 @@
+// 多维 list 解构：元素本身是 list 时按位置拆开，多出来的变量取 null。
+@each $a, $b in (1 2, 3 4, 5 6) {
+  .d-#{$a} {
+    span: $b;
+  }
+}
+
+@each $a, $b, $c in (1 2, 3) {
+  .t-#{$a}-#{$b} {
+    third: inspect($c);
+  }
+}
+
+@each $k, $v in (x 1, y 2) {
+  .map-#{$k} {
+    v: $v;
+  }
+}
+
+// 元素是单值时按「一个元素的 list」处理。
+@each $a, $b in (1, 2) {
+  .single-#{$a} {
+    second: inspect($b);
+  }
+}
+
+// 空 list：循环体一次都不执行。
+@each $x in () {
+  .never-#{$x} {
+    v: $x;
+  }
+}
+
+.nested-lists {
+  values: inspect(join(1 2, (3, 4)));
+}

@@ -1,0 +1,27 @@
+.a {
+  size: 10px;
+  size-alias: 10px;
+  color: red;
+  from-module: #336699;
+  local: 1;
+}
+.a .b {
+  inner: 2;
+}
+.a {
+  outer: 2;
+}
+
+.c {
+  bumped: 5;
+}
+
+.d {
+  global-read: 5;
+}
+
+.e {
+  known-fn: true;
+  known-fn-alias: true;
+  not-a-sass-fn: un_quote("x");
+}

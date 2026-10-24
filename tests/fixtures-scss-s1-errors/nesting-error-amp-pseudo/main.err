@@ -1,0 +1,5 @@
+{
+ "message": "Top-level selectors may not contain the parent selector \"&\".",
+ "line": 3,
+ "column": 0
+}

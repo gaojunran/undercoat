@@ -1,0 +1,10 @@
+@function f() {
+  .nested {
+    a: 1;
+  }
+  @return 2;
+}
+
+.r {
+  v: f();
+}

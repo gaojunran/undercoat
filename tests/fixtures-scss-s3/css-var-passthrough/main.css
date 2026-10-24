@@ -1,0 +1,22 @@
+.chip {
+  a: rgb(var(--bs-tertiary-color-rgb));
+  b: rgba(var(--c), 0.5);
+  c: rgba(0, 0, 0, var(--a));
+  d: hsla(var(--h), 100%, 67%, 0.1);
+  e: hsl(var(--h), 10%, 20%);
+  f: #010000;
+  g: #030000;
+  h: rgba(2, 0, 0, var(--alpha));
+  i: color(var(--x));
+}
+
+.space {
+  a: rgb(0 0 0/var(--o));
+  b: hsl(var(--h), 50%, 50%);
+}
+
+.real {
+  a: black;
+  b: rgba(0, 0, 0, 0.5);
+  c: #40bf40;
+}

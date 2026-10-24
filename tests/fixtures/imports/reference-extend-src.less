@@ -1,0 +1,24 @@
+// (reference) 目标文件：规则默认不输出，只在被 mixin 调用 / extend 命中时产出
+
+/* 顶层注释：被 extend 命中也不输出 */
+
+.ref-base {
+  font-weight: bold;
+}
+
+.ref-multi {
+  /* 体内注释保留，且与声明紧凑拼接 */
+  a: 1;
+  b: 2;
+  c: 3;
+}
+
+.ref-unused {
+  color: blue;
+}
+
+@media screen {
+  .ref-media {
+    c: 3;
+  }
+}

@@ -1,0 +1,14 @@
+.a {
+  width: 8px;
+  box-shadow: 1px 2px #ccc;
+}
+.a:hover {
+  color: #00f;
+}
+
+.b {
+  box-shadow: 1px 4px #ccc;
+}
+.b:hover {
+  color: #00f;
+}

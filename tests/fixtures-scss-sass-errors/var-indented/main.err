@@ -1,0 +1,5 @@
+{
+ "message": "Nothing may be indented beneath a variable declaration.",
+ "line": 2,
+ "column": 2
+}

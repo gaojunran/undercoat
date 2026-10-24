@@ -1,0 +1,41 @@
+@charset "UTF-8";
+.a:nth-child(2n+1) {
+  x: 1;
+}
+
+.b:nth-child(-n+3) {
+  x: 2;
+}
+
+.c:nth-child(3n-1) {
+  x: 3;
+}
+
+.d:nth-child(odd) {
+  x: 4;
+}
+
+.e:nth-child(7) {
+  x: 5;
+}
+
+.f:nth-child(2n+1 of .g, .h) {
+  x: 6;
+}
+
+.i:nth-last-child(3n+2) {
+  x: 7;
+}
+
+/* nth-of-type 不归一 An+B（dart-sass 实测） */
+.j:nth-of-type(-n + 3) {
+  x: 8;
+}
+
+.k:nth-of-type(2N+1) {
+  x: 9;
+}
+
+.l:not(:nth-child(2n+1)) {
+  x: 10;
+}

@@ -1,0 +1,30 @@
+.units {
+  eq: number;
+  eq: px;
+  cmp: gt;
+  cmp: gte;
+  cmp: lt;
+  cmp: lte;
+}
+.logic-mix {
+  or: either;
+  not: differ;
+  nested: differ;
+  and: both;
+}
+.truth {
+  truthy: yes;
+  truthy: no;
+}
+.types {
+  type: color;
+  type: string;
+  type: keyword;
+  type: pixel;
+  type: number;
+  type: percentage;
+}
+.default-func {
+  case: one;
+  default: 2;
+}

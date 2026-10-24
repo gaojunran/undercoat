@@ -1,0 +1,47 @@
+// 嵌套属性：`prop: { sub: v }` 展开成 `prop-sub`。外层有值时先输出外层。
+@mixin bg-color {
+  color: #fff;
+}
+
+.a {
+  background: {
+    color: #fff;
+    size: 40rpx 40rpx;
+  }
+}
+
+.b {
+  margin: 3px {
+    left: 4px;
+  }
+}
+
+// 多层嵌套拼名字；@include / @if 里的声明同样带前缀。
+.c {
+  font: {
+    family: serif;
+    style: {
+      italic: yes;
+    }
+    weight: bold;
+  }
+}
+
+.d {
+  background: {
+    @include bg-color;
+  }
+}
+
+.e {
+  border: 1px solid {
+    @if true {
+      color: red;
+    }
+  }
+}
+
+// 空块整条丢弃。
+.f {
+  outline: {}
+}

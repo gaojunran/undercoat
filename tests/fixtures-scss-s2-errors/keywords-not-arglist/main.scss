@@ -1,0 +1,7 @@
+@mixin m($a) {
+  x: inspect(keywords($a));
+}
+
+.r {
+  @include m(1);
+}

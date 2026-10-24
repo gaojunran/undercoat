@@ -1,0 +1,11 @@
+.a .item {
+  name: caller;
+}
+.a {
+  after: mixin;
+}
+
+.b {
+  n: 1;
+  n: 1;
+}

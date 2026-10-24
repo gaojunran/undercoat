@@ -1,0 +1,10 @@
+// 路径插值：先在作用域求值，再按结果解析文件
+@theme: "part";
+@dir: "imports";
+
+@import "@{dir}/@{theme}.less";
+@import "@{dir}/deep/nested.less";
+
+.a {
+  .share();
+}

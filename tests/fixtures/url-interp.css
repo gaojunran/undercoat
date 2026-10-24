@@ -1,0 +1,18 @@
+.a {
+  src: url("../fonts/glyphicons-halflings-regular.eot");
+}
+.b {
+  background: url("img/photo.png");
+}
+.c {
+  background: url('../fonts/glyphicons-halflings-regular.svg#glyphicons-halflings-regular');
+}
+.d {
+  background: url("raw/plain.png");
+}
+.e {
+  background: url(data:image/png;base64,iVBORw0KGgo=);
+}
+.f {
+  background: url("img/plain.png");
+}

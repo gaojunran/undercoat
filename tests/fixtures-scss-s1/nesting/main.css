@@ -1,0 +1,30 @@
+.card {
+  color: red;
+}
+.card:hover {
+  color: blue;
+}
+.card-title {
+  font-weight: bold;
+}
+.dark .card {
+  color: white;
+}
+.card + .card {
+  margin-left: 1px;
+}
+.card[data-on] {
+  outline: 1px solid;
+}
+.card .body,
+.card .footer {
+  padding: 1px;
+}
+
+.grid-item, .flex-item {
+  flex: 1;
+}
+
+.a .wrap .b .wrap {
+  color: green;
+}

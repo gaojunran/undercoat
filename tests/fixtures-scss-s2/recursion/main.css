@@ -1,0 +1,9 @@
+.level-3 {
+  depth: 3;
+}
+.level-3 .level-2 {
+  depth: 2;
+}
+.level-3 .level-2 .level-1 {
+  depth: 1;
+}

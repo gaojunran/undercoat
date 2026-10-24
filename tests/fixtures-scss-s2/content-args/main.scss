@@ -1,0 +1,22 @@
+@mixin grid($cols) {
+  @content(1, $cols);
+  @content(2, $cols);
+}
+
+.a {
+  @include grid(3) using ($index, $total: 1) {
+    index: $index;
+    total: $total;
+  }
+}
+
+@mixin spread-content {
+  @content(1, 2, 3);
+}
+
+.b {
+  @include spread-content using ($first, $rest...) {
+    first: $first;
+    rest: $rest;
+  }
+}

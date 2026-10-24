@@ -1,0 +1,17 @@
+@mixin rest($a, $rest...) {
+  head: $a;
+  count: length($rest);
+}
+
+.a {
+  @include rest(1, 2, 3);
+}
+
+.b {
+  @include rest(1);
+}
+
+$pair: 4, 5;
+.c {
+  @include rest($pair...);
+}

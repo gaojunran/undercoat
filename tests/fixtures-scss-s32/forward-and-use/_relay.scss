@@ -1,0 +1,3 @@
+@forward "lib";
+@use "lib" as m;
+.relay { local: m.$v; f: m.ff() }

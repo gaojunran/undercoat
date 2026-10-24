@@ -1,0 +1,25 @@
+// 属性名插值、`$prop` 取值与 `!important` 重解析
+@p: color;
+@num: (1/3);
+
+.precision {
+  @{num}: 1;
+  @{p}: red;
+}
+
+.test-important {
+  color: red !important;
+  background: $color;
+}
+
+.test-cascade {
+  margin: 2px !important;
+  padding: $margin;
+}
+
+.nested {
+  border: 1px solid black;
+  .inner {
+    outline: $border;
+  }
+}

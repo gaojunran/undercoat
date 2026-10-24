@@ -1,0 +1,27 @@
+// 自定义属性走原文透传，但字符串要归一双引号（dart 的 quoted string 规则）。
+:root {
+  --a: 'a b', 'c';
+  --b: 'in';
+  --c: "has 'single'";
+  --d: 'it\'s';
+  --e: url('x y.png');
+  --f: #{"x"} '#{"y"}';
+  --g: 'x#{1}y';
+  --h: 1   !important;
+  --i: 'q'!important;
+}
+
+// 换行的值按「输出缩进 − 最小缩进」重排，空行后的缩进保留。
+.j {
+  --k: a,
+       b,
+         c;
+  --l: 1
+    ;
+}
+
+// 普通声明的字符串同样归一（对照）。
+.m {
+  content: 'q';
+  font-family: 'Helvetica Neue', 'Arial';
+}

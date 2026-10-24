@@ -1,0 +1,13 @@
+.theme-rule {
+  border: 1px solid #123456;
+}
+
+.palette-rule {
+  color: #abcdef;
+}
+
+.consumer {
+  color: #123456;
+  background: #abcdef;
+  border-color: #123456;
+}

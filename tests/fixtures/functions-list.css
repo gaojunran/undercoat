@@ -1,0 +1,34 @@
+.list {
+  length: 4;
+  length-comma: 3;
+  length-literal: 3;
+  extract-1: a;
+  extract-3: 3;
+  extract-out-of-range: extract(a b c d, 9);
+  extract-literal: 20px;
+}
+.range {
+  one: 1 2 3 4;
+  two: 2 3 4 5;
+  three: 10px 20px 30px;
+  four: 1 2 3;
+}
+.each-list {
+  a-1: 1;
+  b-2: 2;
+  c-3: 3;
+  d-4: 4;
+}
+.each-detached {
+  one: blue;
+  two: green;
+}
+.col-1 {
+  width: 10px;
+}
+.col-2 {
+  width: 20px;
+}
+.col-3 {
+  width: 30px;
+}

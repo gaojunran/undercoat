@@ -1,0 +1,14 @@
+.a {
+  head: 1;
+  count: 2;
+}
+
+.b {
+  head: 1;
+  count: 0;
+}
+
+.c {
+  head: 4;
+  count: 1;
+}

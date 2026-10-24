@@ -1,0 +1,20 @@
+// 精确 extend：目标必须与整条选择器完全相同（含伪类、组合子）
+.button {
+  padding: 4px;
+}
+.button:hover {
+  padding: 6px;
+}
+.button .icon {
+  margin: 0;
+}
+.primary:extend(.button) {
+  background: blue;
+}
+.primary-hover:extend(.button:hover) {
+  background: navy;
+}
+.group-a,
+.group-b:extend(.button .icon) {
+  color: red;
+}

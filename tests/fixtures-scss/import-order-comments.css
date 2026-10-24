@@ -1,0 +1,8 @@
+/* lead */
+@import url(a.css);
+@import url(b.css);
+.a {
+  v: 1;
+}
+
+/* tail */

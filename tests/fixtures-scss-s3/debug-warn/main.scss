@@ -1,0 +1,21 @@
+// @debug / @warn / @error 的 inspect / CSS 形态（stderr 由 scss_s3_golden.rs 断言）。
+$theme-name: dark;
+
+@debug (1, 2);
+@debug null;
+@debug #fff;
+@debug "quoted string";
+@debug (a: "q");
+
+@warn "careful with #{$theme-name}";
+
+@function risky($n) {
+  @if $n < 0 {
+    @error "negative value: #{$n}";
+  }
+  @return $n * 2;
+}
+
+.r {
+  a: risky(2);
+}

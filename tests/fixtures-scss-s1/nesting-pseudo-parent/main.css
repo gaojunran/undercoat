@@ -1,0 +1,91 @@
+:not(.a) {
+  x: 1;
+}
+
+:not(.a, .b) {
+  x: 2;
+}
+:has(> .a, > .b) {
+  x: 3;
+}
+:nth-child(2n of .a, .b) {
+  x: 4;
+}
+:not(.a, .b) .c {
+  x: 5;
+}
+:not(.a, .b):hover {
+  x: 6;
+}
+:is(.a, .b) .a, :is(.a, .b) .b {
+  x: 7;
+}
+:not(.a + .a, .a + .b, .b + .a, .b + .b) {
+  x: 8;
+}
+:not(:is(.a, .b)) {
+  x: 9;
+}
+:not(> .a, > .b) {
+  x: 10;
+}
+:not(.a, .x, .b) {
+  x: 11;
+}
+:is(.a, .x, .b) {
+  x: 12;
+}
+:not(.a.p, .x, .b.p) {
+  x: 13;
+}
+:not(.x .a, .x .b) {
+  x: 14;
+}
+:nth-child(2n of .a, .z, .b) {
+  x: 15;
+}
+.a:not(.a, .b), .b:not(.a, .b) {
+  x: 16;
+}
+.a-s:not(.a, .b), .b-s:not(.a, .b) {
+  x: 17;
+}
+.c .a :not(.a, .b), .c .b :not(.a, .b) {
+  x: 18;
+}
+
+:not(.p .q) {
+  x: 19;
+}
+.b:not(.p .q) {
+  x: 20;
+}
+
+:not(.a) :is(.a) {
+  x: 21;
+}
+
+:not(.a, .b):not(.a, .b) {
+  x: 22;
+}
+
+:not(.a,
+.b) {
+  x: 23;
+}
+
+:not(.x,
+.z), .x .y,
+.z .y {
+  x: 24;
+}
+
+:not(.a .b) {
+  x: 25;
+}
+
+@media screen {
+  :not(.a, .b) {
+    x: 26;
+  }
+}

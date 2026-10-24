@@ -1,0 +1,5 @@
+.a {
+  @mixin local {
+    b: 1;
+  }
+}

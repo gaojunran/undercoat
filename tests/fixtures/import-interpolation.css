@@ -1,0 +1,14 @@
+.part {
+  p: 1;
+}
+@media print {
+  .part-print {
+    q: 2;
+  }
+}
+.deep-part {
+  d: 3;
+}
+.a {
+  top: 1px;
+}

@@ -1,0 +1,35 @@
+// 可变参、@arguments、参数参与运算与插值
+.gaps(@rest...) {
+  all: @rest;
+}
+
+.gaps-then-name(@a; @rest...) {
+  first: @a;
+  others: @rest;
+}
+
+.rest-only {
+  .gaps(1, 2, 3);
+}
+
+.rest-mixed {
+  .gaps-then-name(1; 2; 3);
+}
+
+.args(@a, @b) {
+  all: @arguments;
+  first: @a;
+}
+
+.arguments {
+  .args(10px, 20px);
+}
+
+.compute(@size) {
+  width: (@size * 2);
+  content: "size=@{size}";
+}
+
+.computed {
+  .compute(5px);
+}

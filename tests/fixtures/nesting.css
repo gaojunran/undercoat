@@ -1,0 +1,18 @@
+.a,
+.b {
+  color: red;
+}
+.a .c,
+.b .c,
+.a .d,
+.b .d {
+  top: 1px;
+}
+.a:hover,
+.b:hover {
+  opacity: 0.5;
+}
+.a-x,
+.b-x {
+  left: 2px;
+}

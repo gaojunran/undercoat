@@ -1,0 +1,3 @@
+$local: 4px;
+@use "theme" with ($primary: #123456, $size: $local * 2);
+.z { primary: theme.$primary; size: theme.$size }

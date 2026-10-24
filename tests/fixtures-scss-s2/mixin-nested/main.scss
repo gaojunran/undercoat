@@ -1,0 +1,20 @@
+@mixin hover-lift($amount: 2px) {
+  transform: translateY(-$amount);
+  &:hover {
+    transform: translateY(-$amount * 2);
+  }
+  .theme-dark & {
+    transform: none;
+  }
+}
+
+.button {
+  @include hover-lift;
+}
+
+.card {
+  @mixin local {
+    border: 1px solid;
+  }
+  @include local;
+}

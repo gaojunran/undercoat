@@ -1,0 +1,34 @@
+@charset "UTF-8";
+/* IE `\9` hack：单位/标识符是转义写出来的，序列化时必须补尾随空格 */
+.a {
+  margin-top: 1px\9 ;
+}
+
+.b {
+  margin-top: 1px \9 ;
+}
+
+.c {
+  border-top: 4px solid\9 ;
+}
+
+.d {
+  background-color: #000 \9 ;
+}
+
+.e {
+  width: 1p\9 x;
+}
+
+.f {
+  width: 1px\9 \9 ;
+}
+
+.g {
+  height: 10\%;
+}
+
+.h {
+  filter: alpha(opacity=65);
+  zoom: 1;
+}

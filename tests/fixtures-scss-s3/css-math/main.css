@@ -1,0 +1,27 @@
+.css {
+  a: 1;
+  b: 2px;
+  c: 3px;
+  d: 4px;
+  e: min(var(--w), 10px);
+  f: 3;
+  g: min(10%, 2px);
+  h: 1rem;
+  i: -webkit-min(1, 2);
+  j: 1;
+  k: 1px;
+}
+
+.sass {
+  a: 1;
+  b: 1;
+  c: 1px;
+  d: 3px;
+}
+
+.other {
+  a: clamp(1rem, 2vw, 3rem);
+  b: sqrt(2);
+  c: translate(1px, 2px);
+  d: my-fn(1, 2);
+}

@@ -1,0 +1,5 @@
+{
+ "message": "@content is only allowed within mixin declarations.",
+ "line": 2,
+ "column": 2
+}

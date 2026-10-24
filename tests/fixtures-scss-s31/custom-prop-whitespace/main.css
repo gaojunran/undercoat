@@ -1,0 +1,31 @@
+.theme {
+  --a:	#111;
+  --b: #222;
+  --c: #333;
+  --d:	#444;
+  --e:
+  	#555;
+  --spaces-to-tab: a	b;
+  --tab-to-spaces: a b;
+  --trailing-tab: 1	;
+}
+
+.mixed {
+  --a: a	"b"	c;
+  --b: a	b	c;
+  --c: a	/* note */	b;
+  --d:	"x"	;
+}
+
+.multiline {
+  --list: a,
+  b,
+    c;
+  --deeper:
+  x;
+}
+
+.blank {
+  --only-tab:	;
+  --only-space: ;
+}

@@ -1,0 +1,11 @@
+$display: grid;
+
+.a {
+  @supports (display: $display) and (not (display: inline-grid)) {
+    x: 1;
+  }
+
+  @supports (display: $missing) {
+    y: 2;
+  }
+}

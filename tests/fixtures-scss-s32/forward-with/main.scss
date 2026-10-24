@@ -1,0 +1,2 @@
+@use "theme" with ($color: purple);
+.z { color: theme.$color }

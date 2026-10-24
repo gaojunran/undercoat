@@ -1,0 +1,50 @@
+// 循环变量的 semi-global 规则：根层循环体能改全局，规则里的循环只改局部。
+$count: 0;
+@each $x in a b c {
+  $count: $count + 1;
+}
+.root-each {
+  count: $count;
+}
+
+$sum: 0;
+@for $i from 1 through 3 {
+  $sum: $sum + $i;
+  @if $i == 2 {
+    $sum: 100;
+  }
+}
+.root-for {
+  sum: $sum;
+}
+
+$w: 0;
+@while $w < 2 {
+  $w: $w + 1;
+}
+.root-while {
+  w: $w;
+}
+
+// 循环变量遮蔽同名全局变量，循环结束后原值不变。
+$shadowed: keep;
+@each $shadowed in 1 2 {
+  .shadow-#{$shadowed} {
+    v: $shadowed;
+  }
+}
+.after-shadow {
+  v: $shadowed;
+}
+
+// 规则体里的循环：赋值落在规则局部，不影响全局。
+$inner-count: 0;
+.scoped {
+  @each $q in a b {
+    $inner-count: $inner-count + 1;
+  }
+  inner: $inner-count;
+}
+.outside {
+  inner-count: $inner-count;
+}

@@ -1,0 +1,22 @@
+$global-count: 0;
+
+@mixin read-modify {
+  @if $global-count == 0 {
+    $global-count: 10 !global;
+  }
+}
+
+.a {
+  $local: 1;
+  @if true {
+    $local: 2;
+  }
+  local: $local;
+}
+
+@include read-modify;
+.b { count: $global-count; }
+
+@if $global-count == 10 {
+  .c { matched: yes; }
+}

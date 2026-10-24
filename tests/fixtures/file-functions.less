@@ -1,0 +1,28 @@
+// data-uri / image-size 的 golden 用例（期望产物由 less@4.1.3 生成）
+#data-uri {
+  text: data-uri('assets/page.txt');
+  html: data-uri('assets/page.html');
+  explicit-mime: data-uri('text/plain', 'assets/page.txt');
+  png: data-uri('assets/image.png');
+  jpg: data-uri('assets/image.jpg');
+  svg: data-uri('assets/image.svg');
+  fragment: data-uri('assets/image.png#frag');
+  missing: data-uri('assets/missing.png');
+  @path: replace('assets/x.filext', "filext", "png");
+  via-var: data-uri(@path);
+}
+
+#image-size {
+  png: image-size('assets/image.png');
+  png-width: image-width('assets/image.png');
+  png-height: image-height('assets/image.png');
+  jpg: image-size('assets/image.jpg');
+  gif: image-size('assets/image.gif');
+  svg: image-size('assets/image.svg');
+}
+
+#svg-gradient-fn {
+  two-stops: svg-gradient(to bottom, black, white);
+  positioned: svg-gradient(to right, red 20%, blue);
+  radial: svg-gradient(ellipse at center, fade(#999, 50%) 0%, fade(#999, 10%) 100%);
+}

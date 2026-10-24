@@ -1,0 +1,6 @@
+$public: 1;
+$-private: 2;
+$_underscore: 3;
+@mixin _pm { x: 1 }
+@function _pf() { @return 4; }
+@function public-fn() { @return 5; }

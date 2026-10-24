@@ -1,0 +1,18 @@
+.keep {
+  percent: calc(100% - 20px);
+  nested: calc(10vh + calc(5vh));
+  vars: calc(100% - 100px);
+  minmax: calc(50px * 2);
+  parens: calc((100% - 20px) / 3);
+}
+.fold {
+  pure: calc(2 * 3px);
+  pure-number: calc(1 + 1);
+  pure-div: calc(100% / 4);
+  var-calc: calc(100px * 2);
+  literal: calc(2*3px);
+}
+.spacing {
+  spaced: calc(1px + 2px);
+  tight: calc(2*3px);
+}

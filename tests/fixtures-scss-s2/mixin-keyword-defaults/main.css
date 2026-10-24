@@ -1,0 +1,17 @@
+.a {
+  background: #fff;
+  color: red;
+  padding: 4px;
+}
+
+.b {
+  background: black;
+  color: white;
+  padding: 4px;
+}
+
+.c {
+  background: blue;
+  color: black;
+  padding: 8px;
+}

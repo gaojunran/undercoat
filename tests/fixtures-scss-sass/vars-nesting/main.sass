@@ -1,0 +1,22 @@
+// 变量、嵌套、父选择器
+$brand: #336699
+$gap: 8px
+
+/* 块注释 */
+.card
+  color: $brand
+  padding: $gap
+
+  // 行注释，下面更深的一行属于注释
+     这一行也是注释
+
+  &__title,
+  &__body
+    margin: 0
+
+  .btn,
+  .link
+    color: $brand
+
+  &:hover
+    color: #000

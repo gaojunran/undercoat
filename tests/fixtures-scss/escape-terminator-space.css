@@ -1,0 +1,51 @@
+@charset "UTF-8";
+@media screen and (min-width: 0\0 ) {
+  .a {
+    x: 1;
+  }
+}
+@media screen and (min-width: 0\0 ) {
+  .b {
+    x: 2;
+  }
+}
+@supports (display: grid\0 ) {
+  .c {
+    x: 3;
+  }
+}
+@media (min-width: 4\%) {
+  .d {
+    x: 4;
+  }
+}
+@media (aab) {
+  .e {
+    x: 5;
+  }
+}
+@media (aa b) {
+  .f {
+    x: 6;
+  }
+}
+@media (x\.y) {
+  .g {
+    x: 7;
+  }
+}
+@media (x\9 ) {
+  .h {
+    x: 8;
+  }
+}
+.esc {
+  w: 1px\0 ;
+  x: a\b ;
+  y: \0 ;
+  z: "�";
+}
+
+.esc2 {
+  margin: 0\0 auto;
+}

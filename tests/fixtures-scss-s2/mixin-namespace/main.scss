@@ -1,0 +1,14 @@
+@use "shared" as tokens;
+@use "shared" as *;
+
+.a {
+  @include tokens.pad(2);
+}
+
+.b {
+  @include pad(3);
+}
+
+.c {
+  @include only-star;
+}

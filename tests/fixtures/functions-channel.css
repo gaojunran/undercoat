@@ -1,0 +1,70 @@
+.channels {
+  red: 51;
+  green: 102;
+  blue: 153;
+  alpha: 0.5;
+  hue: 210;
+  saturation: 50%;
+  lightness: 40%;
+}
+.luma {
+  luma: 12.50645743%;
+  luminance: 37.192%;
+  luma-alpha: 6.25322872%;
+  contrast-dark: #ffffff;
+  contrast-light: #000000;
+  contrast-threshold: #eee;
+}
+.hsv {
+  hue: 210;
+  saturation: 66.66666667%;
+  value: 60%;
+  hsv: #408000;
+  hsva: rgba(96, 128, 64, 0.5);
+}
+.derived {
+  color-hex: #FF0000;
+  color-name: #ff0000;
+  argb: #80336699;
+  argb-solid: #ff336699;
+}
+.strings {
+  replace: "hello less";
+  replace-global: "b-b-b";
+  replace-flag-i: "hi";
+  format: "x-7";
+  escaped: no-quotes;
+}
+.logic {
+  if-true: 10px;
+  if-false: 20px;
+  if-compare: red;
+  boolean-true: true;
+  boolean-false: false;
+}
+.types {
+  isnumber: true;
+  iscolor: true;
+  isstring: true;
+  iskeyword: true;
+  ispixel: true;
+  ispercentage: true;
+  isem: true;
+  isunit: true;
+}
+.blend {
+  multiply: #000000;
+  screen: #ff66ff;
+  overlay: #ff0000;
+  softlight: #ff2900;
+  hardlight: #0000ff;
+  difference: #ff66ff;
+  exclusion: #ff66ff;
+  average: #803380;
+  negation: #ff66ff;
+  alpha: #000080;
+}
+.more-types {
+  isruleset: false;
+  isdefined: true;
+}

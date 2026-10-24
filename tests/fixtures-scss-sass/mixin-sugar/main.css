@@ -1,0 +1,12 @@
+.box {
+  width: 10px;
+  height: 10px;
+}
+.box.tall {
+  width: 4px;
+  height: 40px;
+}
+
+.host .inner {
+  color: #f00;
+}

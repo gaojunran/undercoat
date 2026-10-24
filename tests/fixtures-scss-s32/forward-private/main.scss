@@ -1,0 +1,2 @@
+@use "fwd" as f;
+.z { v: f.$public; f: f.public-fn(); p: variable-exists("-private"); q: function-exists("_pf"); m: mixin-exists("_pm") }

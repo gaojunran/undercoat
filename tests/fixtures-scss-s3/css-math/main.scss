@@ -1,0 +1,32 @@
+// min()/max()：能按纯 CSS 数学函数解析时原样输出，否则走 Sass 语义。
+.css {
+  a: min(1, 2);
+  b: max(1px, 2px);
+  c: min(1px + 2px, 3px);
+  d: max(calc(1px + 2px), 4px);
+  e: min(var(--w), 10px);
+  f: max(min(1, 2), 3);
+  g: min(10%, 2px);
+  h: max(1rem, 0);
+  i: -webkit-min(1, 2);
+  j: MIN(1, 2);
+  k: min(1px, 2px * 3);
+}
+
+// 变量实参 → Sass 内置函数（求值成数字）。
+$one: 1;
+$two: 2;
+.sass {
+  a: min($one, $two);
+  b: max($one, 0);
+  c: min(1px, 2px);
+  d: min((1px + 2px), 3px);
+}
+
+// 已知的 CSS 函数保持透传。
+.other {
+  a: clamp(1rem, 2vw, 3rem);
+  b: sqrt(2);
+  c: translate(1px, 2px);
+  d: my-fn(1, 2);
+}

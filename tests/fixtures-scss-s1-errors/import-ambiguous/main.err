@@ -1,0 +1,5 @@
+{
+ "message": "It's not clear which file to import. Found:\n  _dup.scss\n  dup.scss",
+ "line": 1,
+ "column": 8
+}

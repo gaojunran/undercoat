@@ -1,0 +1,17 @@
+.paragraph, .blockquote {
+  margin: 0 0 40rpx;
+}
+
+.blockquote {
+  padding: 20rpx 30rpx;
+}
+.blockquote .paragraph, .blockquote .blockquote {
+  margin-bottom: 30rpx;
+}
+.blockquote .paragraph:last-child, .blockquote .blockquote:last-child {
+  margin-bottom: 0;
+}
+
+.a .b, .a .d, .a .c {
+  x: 1;
+}

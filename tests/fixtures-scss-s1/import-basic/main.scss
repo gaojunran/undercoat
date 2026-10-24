@@ -1,0 +1,9 @@
+@import "tokens";
+@import "components/button";
+@import "plain.css";
+@import "tokens", "components/index";
+
+.with-rule {
+  @import "nested/part";
+  color: $brand;
+}

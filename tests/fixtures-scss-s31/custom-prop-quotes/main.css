@@ -1,0 +1,23 @@
+:root {
+  --a: "a b", "c";
+  --b: "in";
+  --c: "has 'single'";
+  --d: "it's";
+  --e: url("x y.png");
+  --f: x "y";
+  --g: "x1y";
+  --h: 1 !important;
+  --i: "q"!important;
+}
+
+.j {
+  --k: a,
+       b,
+         c;
+  --l: 1 ;
+}
+
+.m {
+  content: "q";
+  font-family: "Helvetica Neue", "Arial";
+}

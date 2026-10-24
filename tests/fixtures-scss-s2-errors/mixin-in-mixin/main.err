@@ -1,0 +1,5 @@
+{
+ "message": "Mixins may not contain mixin declarations.",
+ "line": 2,
+ "column": 2
+}

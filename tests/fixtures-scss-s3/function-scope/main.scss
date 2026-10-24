@@ -1,0 +1,33 @@
+// 函数作用域：根层 / 规则内定义、读取全局、用户函数覆盖同名内置函数。
+$factor: 3;
+
+@function scale($x) {
+  @return $x * $factor;
+}
+
+// 用户定义优先于内置同名函数（这里的 rgb 完全顶掉内置实现）。
+@function rgb($c) {
+  @return "user-rgb:#{$c}";
+}
+
+// 内置函数在函数体里正常可用。
+@function shade($c) {
+  @return darken($c, 10%);
+}
+
+.outer {
+  @function local($x) {
+    @return $x + 100;
+  }
+
+  v: local(1);
+  w: scale(2);
+  x: rgb(1 2 3);
+  y: shade(#336699);
+  z: scale(local(1));
+}
+
+.after {
+  // 规则内定义的函数不泄漏到规则外（这里解析成未知名 → CSS 透传）。
+  v: local(1);
+}

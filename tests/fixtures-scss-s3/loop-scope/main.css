@@ -1,0 +1,31 @@
+.root-each {
+  count: 3;
+}
+
+.root-for {
+  sum: 103;
+}
+
+.root-while {
+  w: 2;
+}
+
+.shadow-1 {
+  v: 1;
+}
+
+.shadow-2 {
+  v: 2;
+}
+
+.after-shadow {
+  v: keep;
+}
+
+.scoped {
+  inner: 0;
+}
+
+.outside {
+  inner-count: 0;
+}

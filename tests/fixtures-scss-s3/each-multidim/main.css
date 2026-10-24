@@ -1,0 +1,39 @@
+.d-1 {
+  span: 2;
+}
+
+.d-3 {
+  span: 4;
+}
+
+.d-5 {
+  span: 6;
+}
+
+.t-1-2 {
+  third: null;
+}
+
+.t-3- {
+  third: null;
+}
+
+.map-x {
+  v: 1;
+}
+
+.map-y {
+  v: 2;
+}
+
+.single-1 {
+  second: null;
+}
+
+.single-2 {
+  second: null;
+}
+
+.nested-lists {
+  values: 1 2 3 4;
+}

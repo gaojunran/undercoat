@@ -1,0 +1,9 @@
+@mixin m {
+  @media (min-width: $missing) {
+    x: 1;
+  }
+}
+
+.r {
+  @include m;
+}

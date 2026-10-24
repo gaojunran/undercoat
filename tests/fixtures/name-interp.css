@@ -1,0 +1,31 @@
+.foo {
+  a: 1;
+}
+#foo {
+  a: 2;
+}
+.foo-3 {
+  a: 3;
+}
+.interpolated-calls {
+  a: 1;
+  a: 2;
+}
+.\123 {
+  b: 4;
+}
+.escaped-call {
+  b: 4;
+}
+.person-holder {
+  gender: "Male";
+}
+.w3 {
+  width: 15px;
+}
+.w2 {
+  width: 10px;
+}
+.w1 {
+  width: 5px;
+}

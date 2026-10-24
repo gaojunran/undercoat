@@ -1,0 +1,3 @@
+@forward "base" with ($color: green !default);
+@use "base";
+.theme { color: base.$color }

@@ -1,0 +1,101 @@
+// guard 比较（单位感知）、逻辑组合、真值、类型判断与 default()
+.mixin(@a) when (@a = 4) {
+  eq: number;
+}
+.mixin(@a) when (@a = 4px) {
+  eq: px;
+}
+.mixin(@a) when (@a > 10) {
+  cmp: gt;
+}
+.mixin(@a) when (@a >= 10) {
+  cmp: gte;
+}
+.mixin(@a) when (@a < 10) {
+  cmp: lt;
+}
+.mixin(@a) when (@a <= 10) {
+  cmp: lte;
+}
+
+.units {
+  .mixin(4);
+  .mixin(4px);
+  .mixin(20);
+  .mixin(10);
+  .mixin(3);
+}
+
+.logic(@a, @b) when (@a > 0) and (@b > 0) {
+  and: both;
+}
+.logic(@a, @b) when (@a > 10), (@b > 10) {
+  or: either;
+}
+.logic(@a, @b) when not(@a = @b) {
+  not: differ;
+}
+.logic(@a, @b) when (((not(((@a = @b)))))) {
+  nested: differ;
+}
+
+.logic-mix {
+  .logic(1, 2);
+  .logic(11, 2);
+  .logic(1, 1);
+}
+
+.truthy(@v) when (@v) {
+  truthy: yes;
+}
+.truthy(@v) when not(@v) {
+  truthy: no;
+}
+
+.truth {
+  .truthy(1);
+  .truthy(0);
+  .truthy(true);
+  .truthy(false);
+}
+
+.type(@v) when (isnumber(@v)) {
+  type: number;
+}
+.type(@v) when (iscolor(@v)) {
+  type: color;
+}
+.type(@v) when (isstring(@v)) {
+  type: string;
+}
+.type(@v) when (iskeyword(@v)) {
+  type: keyword;
+}
+.type(@v) when (ispixel(@v)) {
+  type: pixel;
+}
+.type(@v) when (ispercentage(@v)) {
+  type: percentage;
+}
+
+.types {
+  .type(4);
+  .type(#fff);
+  .type("str");
+  .type(keyword);
+  .type(8px);
+  .type(50%);
+}
+
+// default()：非 default 命中则 default 不展开
+.d(@x) when (@x = 1) {
+  case: one;
+}
+.d(@x) when (default()) {
+  default: @x;
+}
+
+.default-func {
+  .d(1);
+  .d(2);
+}

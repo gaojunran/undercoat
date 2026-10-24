@@ -1,0 +1,43 @@
+@charset "UTF-8";
+/*!
+ * 许可证块注释的续行也要有 segment
+ * 第三行
+ */
+.accent,
+.plain,
+.plain > .child {
+  color: red;
+}
+
+.wrap .a,
+.wrap .b {
+  color: blue;
+}
+.wrap.accent {
+  color: green;
+}
+
+@media (min-width: 640px) {
+  .m1,
+.m2 {
+    margin: 0;
+  }
+}
+@keyframes spin {
+  0%, 50%, 100% {
+    opacity: 0;
+  }
+}
+/* 规则之间的单行注释 */
+.pct {
+  width: 50%;
+}
+
+.use {
+  display: block;
+}
+
+@font-face {
+  font-family: "x";
+  src: url("x.woff2");
+}

@@ -1,0 +1,20 @@
+@media (min-width: 768px) {
+  .a {
+    color: red;
+  }
+}
+@media (min-width: 768px) and (max-width: 991px) {
+  .b {
+    color: blue;
+  }
+}
+@media screen and (min-width: 768px) and (max-width: 991px) {
+  .c {
+    color: green;
+  }
+}
+@media all and (device-aspect-ratio: 16 / 9) {
+  .d {
+    max-width: 800px;
+  }
+}

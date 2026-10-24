@@ -1,0 +1,23 @@
+.g {
+  one: white;
+  two: 42;
+  three: 1;
+  four: 2;
+}
+.h {
+  v: white;
+}
+.i {
+  c-primary: blue;
+  c-secondary: red;
+}
+#ns {
+  my-prop: prop-value;
+}
+.j {
+  v: prop-value;
+}
+.k {
+  width: 30px;
+  p-text: quoted;
+}

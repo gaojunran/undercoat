@@ -1,0 +1,32 @@
+// 媒体上下文：块内 extend 只命中同块规则，外层 extend 进入块内
+.screen-only {
+  color: blue;
+}
+@media screen {
+  .inside {
+    color: red;
+  }
+  .inner:extend(.inside) {
+    border: 0;
+  }
+  .inner-all:extend(.screen-only all) {
+    border: 1px;
+  }
+  .inner-miss:extend(.outside) {
+    border: 2px;
+  }
+}
+.outside {
+  color: green;
+}
+.outer:extend(.screen-only) {
+  background: black;
+}
+@media print {
+  .paper {
+    color: black;
+  }
+  .paper-2:extend(.paper) {
+    margin: 0;
+  }
+}

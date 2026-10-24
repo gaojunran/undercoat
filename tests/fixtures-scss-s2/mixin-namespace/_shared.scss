@@ -1,0 +1,9 @@
+$unit: 4px;
+
+@mixin pad($mult: 1) {
+  padding: $unit * $mult;
+}
+
+@mixin only-star {
+  star: yes;
+}

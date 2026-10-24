@@ -1,0 +1,45 @@
+// @for：through 含上界、to 不含、下界大于上界时倒着走、空循环、负数边界。
+@for $i from 1 through 3 {
+  .through-#{$i} {
+    n: $i;
+  }
+}
+
+@for $i from 1 to 3 {
+  .to-#{$i} {
+    n: $i;
+  }
+}
+
+@for $i from 3 through 1 {
+  .down-#{$i} {
+    n: $i;
+  }
+}
+
+@for $i from 1 to 1 {
+  .empty-#{$i} {
+    n: $i;
+  }
+}
+
+@for $i from -1 through 1 {
+  .neg-#{$i} {
+    n: $i;
+  }
+}
+
+// 循环体里可以用 @if / @return 之外的任意语句。
+$total: 0;
+@for $i from 1 through 4 {
+  $total: $total + $i * 10;
+  @if $i % 2 == 0 {
+    .even-#{$i} {
+      total: $total;
+    }
+  }
+}
+
+.final {
+  total: $total;
+}

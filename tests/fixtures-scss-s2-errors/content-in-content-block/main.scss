@@ -1,0 +1,9 @@
+@mixin m {
+  x: 1;
+}
+
+.a {
+  @include m {
+    @content;
+  }
+}

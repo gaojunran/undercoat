@@ -1,0 +1,9 @@
+.a {
+  content: "foobar";
+  content-single: 'single foo';
+  content-escaped: escaped foo;
+  content-quoted: "quoted";
+  content-multi: "foo-foo";
+  content-color: "#444444";
+  content-space-list: "a b";
+}

@@ -1,0 +1,40 @@
+// 逐行锚点回归用例：期望产物/期望 map 来自 dart-sass 1.35.2
+// （scripts/style-diff/scss-map-oracle.cjs 生成，CI 不依赖 node）。
+/*!
+ * 许可证块注释的续行也要有 segment
+ * 第三行
+ */
+$name: accent;
+
+.#{$name},
+.plain,
+.plain > .child { color: red; }
+
+.wrap {
+  .a,
+  .b { color: blue; }
+
+  &.#{$name} { color: green; }
+}
+
+@media (min-width: 640px) {
+  .m1,
+  .m2 { margin: 0; }
+}
+
+@keyframes spin {
+  0%,
+  50%,
+  100% { opacity: 0; }
+}
+
+/* 规则之间的单行注释 */
+.pct { width: 50%; }
+
+%ph { display: block; }
+.use { @extend %ph; }
+
+@font-face {
+  font-family: "x";
+  src: url("x.woff2");
+}

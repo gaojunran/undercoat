@@ -1,0 +1,75 @@
+@supports (position: -webkit-sticky) or (position: sticky) {
+  .a {
+    x: 1;
+  }
+}
+@supports (position: -webkit-sticky) or (position: sticky) {
+  .b {
+    x: 2;
+  }
+}
+@supports (display: grid) {
+  .c {
+    x: 3;
+  }
+}
+@supports (display: grid) {
+  .d {
+    x: 4;
+  }
+}
+@supports (display: grid) {
+  .e {
+    x: 5;
+  }
+}
+@supports not (display: grid) {
+  .f {
+    x: 6;
+  }
+}
+@supports (a: b) and ((c: d) or (e: f)) {
+  .g {
+    x: 7;
+  }
+}
+@supports (a: b) and ((c: d) or (e: f)) {
+  .h {
+    x: 8;
+  }
+}
+@supports ((a: b) or (c: d)) and (e: f) {
+  .i {
+    x: 9;
+  }
+}
+@supports not ((a: b) and (c: d)) {
+  .j {
+    x: 10;
+  }
+}
+@supports (a: b) and (c: d) and (e: f) {
+  .k {
+    x: 11;
+  }
+}
+@supports selector(:has(a)) {
+  .l {
+    x: 12;
+  }
+}
+@supports (a: b) and (c: d) {
+  .m {
+    x: 13;
+  }
+}
+@supports (min-width: 12px) {
+  .n {
+    x: 14;
+  }
+}
+@supports (display: grid) and (not (display: inline-grid)) {
+  .o {
+    x: 15;
+  }
+}

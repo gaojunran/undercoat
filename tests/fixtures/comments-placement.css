@@ -1,0 +1,22 @@
+.bg {
+  background-image: linear-gradient(#333 /* stop */, #111);
+  margin: 0;
+  pad: 1px /* mid */ 2px;
+  size: 4px /* keep */;
+}
+#planadvisor,
+.first,
+.planning {
+  margin: 10px;
+}
+@media all and (max-width: /*! */ 1024px) {
+  .in-media {
+    a: b;
+  }
+}
+@-webkit-keyframes hover {
+  /* moved into block */
+}
+.last {
+  a: yes /* tail */;
+}

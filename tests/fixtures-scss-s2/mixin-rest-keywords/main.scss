@@ -1,0 +1,18 @@
+@mixin collect($first, $rest...) {
+  first: $first;
+  passed-through: inspect($rest);
+  named: inspect(keywords($rest));
+  count: length($rest);
+}
+
+.a {
+  @include collect(1, 2, 3, $extra: 4);
+}
+
+@mixin forward($rest...) {
+  @include collect($rest...);
+}
+
+.b {
+  @include forward(9, $flag: true);
+}

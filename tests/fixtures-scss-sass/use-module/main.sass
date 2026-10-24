@@ -1,0 +1,8 @@
+@use "parts/tokens"
+@use "parts/mixins" as m
+@use "parts/star" as *
+
+.a
+  color: tokens.$ink
+  @include m.pad
+  margin: $space

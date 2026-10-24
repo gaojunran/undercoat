@@ -1,0 +1,26 @@
+$mode: dark
+$bg: null
+
+@if $mode == dark
+  $bg: #000
+@else if $mode == light
+  $bg: #fff
+@else
+  $bg: #888
+
+@each $name, $value in (a: 1px, b: 2px)
+  .m-#{$name}
+    margin: $value
+
+@for $i from 1 through 3
+  .p-#{$i}
+    padding: $i * 1px
+
+$n: 0
+@while $n < 2
+  .w-#{$n}
+    width: 10px
+  $n: $n + 1
+
+.theme
+  background: $bg

@@ -1,0 +1,48 @@
+// @each 遍历 list / map（键值解构）/ 单变量取键值对。
+$sizes: 4px 8px 12px;
+$theme: (primary: #007bff, danger: #dc3545);
+$grid: (1 2, 3 4, 5 6);
+
+@each $size in $sizes {
+  .m-#{$size} {
+    margin: $size;
+  }
+}
+
+@each $name, $color in $theme {
+  .text-#{$name} {
+    color: $color;
+  }
+}
+
+// 单个变量遍历 map：元素是 `键 值` 两元的 list。
+@each $pair in $theme {
+  .pair {
+    content: inspect($pair);
+    key: nth($pair, 1);
+  }
+}
+
+@each $a, $b in $grid {
+  .cell-#{$a} {
+    span: $b;
+  }
+}
+
+// 循环体里的插值、嵌套规则与 @if 都走同一套收集器。
+@each $name, $color in $theme {
+  .btn-#{$name} {
+    background: $color;
+    @if lightness($color) > 50% {
+      color: #000;
+    } @else {
+      color: #fff;
+    }
+    &:hover {
+      background: darken($color, 5%);
+    }
+    @media (min-width: 768px) {
+      padding: 4px;
+    }
+  }
+}

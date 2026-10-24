@@ -1,0 +1,16 @@
+.a {
+  width: 1px solid red;
+  border: 1px solid red;
+}
+.a .b {
+  height: 1px solid red;
+}
+.c {
+  color: red;
+  color: blue;
+  background: blue;
+}
+.d {
+  box-shadow: 0 0 1px red, 0 0 2px blue;
+  outline: 0 0 1px red, 0 0 2px blue;
+}

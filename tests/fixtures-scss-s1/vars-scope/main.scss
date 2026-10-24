@@ -1,0 +1,35 @@
+$base: 4px;
+$derived: $base * 2;
+$base: 8px;
+$theme: null;
+$theme: dark !default;
+$flag: on !default;
+$global-count: 0;
+
+.scope {
+  $base: 12px;
+  $derived: $base; // 声明时急切求值：取块内当前的 $base
+  width: $derived;
+  $base: 16px;
+  nested-width: $base;
+  .inner {
+    $base: 20px;
+    width: $base;
+  }
+  after: $base;
+}
+
+.defaults {
+  theme: $theme;
+  flag: $flag;
+  derived: $derived;
+}
+
+.bump {
+  $global-count: 1 !global;
+  local: $global-count;
+}
+
+.global-read {
+  count: $global-count;
+}

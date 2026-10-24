@@ -1,0 +1,27 @@
+// `&:extend(...)` 与选择器组/嵌套里的 extend
+.base {
+  display: block;
+}
+.wrap {
+  &:extend(.base);
+  margin: 0;
+}
+.list,
+.grid {
+  &:extend(.base);
+  padding: 0;
+}
+.card {
+  color: gray;
+  .card-title:extend(.base) {
+    font-weight: bold;
+  }
+}
+// mixin 体里的 extend 在展开处生效
+.ext-mixin() {
+  &:extend(.base);
+}
+.applied {
+  .ext-mixin();
+  border: 1px;
+}

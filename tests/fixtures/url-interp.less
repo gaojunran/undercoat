@@ -1,0 +1,25 @@
+// url 值内插值（B3）
+@icon-font-path: "../fonts/";
+@icon-font-name: "glyphicons-halflings-regular";
+@png: "img/photo.png";
+@raw: "raw/plain.png";
+
+.a {
+  src: url("@{icon-font-path}@{icon-font-name}.eot");
+}
+.b {
+  background: url(@png);
+}
+.c {
+  background: url('@{icon-font-path}@{icon-font-name}.svg#@{icon-font-name}');
+}
+.d {
+  background: url(@raw);
+}
+// `data:` 裸串与普通 url 原样保留
+.e {
+  background: url(data:image/png;base64,iVBORw0KGgo=);
+}
+.f {
+  background: url("img/plain.png");
+}

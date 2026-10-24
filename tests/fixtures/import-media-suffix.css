@@ -1,0 +1,10 @@
+@media screen and (min-width: 600px) {
+  .box1 {
+    color: red;
+  }
+}
+@media print {
+  .box2 {
+    color: blue;
+  }
+}

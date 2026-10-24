@@ -1,0 +1,2 @@
+@use "top" with ($gap: 7px);
+.z { gap: top.$gap }

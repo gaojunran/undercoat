@@ -1,0 +1,10 @@
+@mixin levels($n) {
+  @if $n > 0 {
+    .level-#{$n} {
+      depth: $n;
+      @include levels($n - 1);
+    }
+  }
+}
+
+@include levels(3);

@@ -1,0 +1,22 @@
+[package]
+name = "undercoat"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+description = "Native Rust compiler for Less and Sass/SCSS — byte-compatible with lessc and dart-sass, no Node runtime"
+readme = "README.md"
+keywords = ["less", "sass", "scss", "css", "compiler"]
+categories = ["compilers", "web-programming"]
+
+[lib]
+name = "undercoat"
+
+[dependencies]
+oxc-css-parser = "0.0.17"
+serde_json = "1"
+tracing = "0.1"
+
+[[bin]]
+name = "undercoat"
+path = "src/bin/undercoat.rs"

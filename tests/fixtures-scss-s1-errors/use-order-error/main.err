@@ -1,0 +1,5 @@
+{
+ "message": "@use rules must be written before any other rules.",
+ "line": 5,
+ "column": 0
+}

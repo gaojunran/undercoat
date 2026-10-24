@@ -1,0 +1,5 @@
+{
+ "message": "$map: var(--m) is not a map.",
+ "line": 2,
+ "column": 5
+}

@@ -1,0 +1,31 @@
+// @extend 的单段扩展者：追加到前缀末尾（两个复合选择器并列 = 隐式后代组合符），
+// 不能因为「前缀相同」就去重成一条。
+.paragraph {
+  margin: 0 0 40rpx;
+}
+
+.blockquote {
+  @extend .paragraph;
+  padding: 20rpx 30rpx;
+
+  .paragraph {
+    margin-bottom: 30rpx;
+  }
+
+  .paragraph:last-child {
+    margin-bottom: 0;
+  }
+}
+
+// 同一个复合选择器被多处 extend（顺序按 dart 的 `_trim`：后登记的在前）。
+.a .b {
+  x: 1;
+}
+
+.c {
+  @extend .b;
+}
+
+.d {
+  @extend .b;
+}

@@ -1,0 +1,24 @@
+// `all`：任意位置、任意长度的子串命中，命中的片段整体替换
+.clearfix:before,
+.clearfix:after {
+  content: "";
+  display: table;
+}
+.panel {
+  .panel-body {
+    border: 1px solid #ddd;
+  }
+}
+.panel-title:extend(.clearfix all) {
+  margin: 0;
+}
+.panel-body:extend(.panel .panel-body all) {
+  background: white;
+}
+// 属性选择器：比较时忽略值的引号（less `Attribute` 分支）
+[data-role="dialog"] {
+  z-index: 10;
+}
+.role-dialog:extend([data-role=dialog] all) {
+  position: fixed;
+}

@@ -1,0 +1,18 @@
+// (reference)：未被引用的规则不输出；被 extend 命中的规则按 less 语义补输出声明
+@import (reference) "imports/reference-extend-src.less";
+
+.x {
+  &:extend(.ref-base);
+  color: red;
+}
+
+.y:extend(.ref-media) {
+  own: 1;
+}
+
+// 多声明被扩展：less 在 (reference) 体里不为声明补换行（`a: 1;b: 2;`）
+.z:extend(.ref-multi) {
+  z: 1;
+}
+
+// .ref-unused 没有被引用，整条不输出

@@ -1,0 +1,5 @@
+{
+ "message": "$color: env(safe-area-inset-top) is not a color.",
+ "line": 2,
+ "column": 9
+}

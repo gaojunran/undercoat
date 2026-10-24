@@ -1,0 +1,4 @@
+@use "top" as t;
+@use "top" as *;
+.ns { v: t.$v; @include t.mm; f: t.ff() }
+.star { v: $v; @include mm; f: ff() }

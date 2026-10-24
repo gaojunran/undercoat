@@ -1,0 +1,40 @@
+// `-` 与 `_` 在变量/函数名里完全等价（命名空间不归一）
+@use "theme";
+
+$base_size: 10px !default;
+$base-size: 20px !default;
+$theme_color: null;
+$theme-color: red !default;
+$count_1: 0;
+
+.a {
+  size: $base-size;
+  size-alias: $base_size;
+  color: $theme_color;
+  from-module: theme.$mod_var;
+
+  $local_var: 1;
+  local: $local-var;
+
+  .b {
+    $local-var: 2;
+    inner: $local_var;
+  }
+
+  outer: $local_var;
+}
+
+.c {
+  $count_1: 5 !global;
+  bumped: $count-1;
+}
+
+.d {
+  global-read: $count_1;
+}
+
+.e {
+  known-fn: map-has-key((k: 1), k);
+  known-fn-alias: map_has_key((k: 1), k);
+  not-a-sass-fn: un_quote("x");
+}

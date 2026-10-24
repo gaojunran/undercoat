@@ -1,0 +1,5 @@
+{
+ "message": "$color: var(--c) is not a color.",
+ "line": 2,
+ "column": 9
+}

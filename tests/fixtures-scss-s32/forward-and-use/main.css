@@ -1,0 +1,9 @@
+.relay {
+  local: shared;
+  f: 9;
+}
+
+.z {
+  v: shared;
+  f: 9;
+}

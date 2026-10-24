@@ -1,0 +1,66 @@
+// 规则上的 guard：命中才输出，未命中整条不输出
+@a: #ddd;
+@b: 2;
+
+.light when (lightness(@a) > 50%) {
+  color: green;
+}
+.dark when (lightness(@a) < 50%) {
+  color: orange;
+}
+
+.multiple when (@b = 1), (@b = 2) {
+  color: red;
+}
+.multiple-gone when (@b = 1), (@b = 3) {
+  color: blue;
+}
+
+.inheritance when (@b = 2) {
+  .test-rule {
+    color: black;
+  }
+  &:hover {
+    color: pink;
+  }
+  .hideme when (@b = 1) {
+    color: green;
+  }
+  & when (@b = 1) {
+    hideme: green;
+  }
+}
+
+.hideme when (@b = 1) {
+  color: green;
+}
+
+.dont-split-me-up {
+  width: 1px;
+  & when (@b = 2) {
+    color: red;
+  }
+  & when (@b = 2) {
+    height: 1px;
+  }
+  * & when (@b = 2) {
+    sibling: true;
+  }
+}
+
+.mixin-with-guard-inside(@colWidth) {
+  .clsWithGuard when (@colWidth <= 0) {
+    display: none;
+  }
+}
+
+.mixin-with-guard-inside(0px);
+
+.scope-check when (@b = 2) {
+  @k: 1px;
+  & when (@b = 2) {
+    @k: 2px;
+    sub-prop: @k;
+  }
+  prop: @k;
+}

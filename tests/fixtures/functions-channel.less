@@ -1,0 +1,72 @@
+@c: #336699;
+@half: rgba(51, 102, 153, 0.5);
+.channels {
+  red: red(@c);
+  green: green(@c);
+  blue: blue(@c);
+  alpha: alpha(@half);
+  hue: hue(@c);
+  saturation: saturation(@c);
+  lightness: lightness(@c);
+}
+.luma {
+  luma: luma(@c);
+  luminance: luminance(@c);
+  luma-alpha: luma(@half);
+  contrast-dark: contrast(@c);
+  contrast-light: contrast(#eee);
+  contrast-threshold: contrast(#808080, #111, #eee, 0.6);
+}
+.hsv {
+  hue: hsvhue(@c);
+  saturation: hsvsaturation(@c);
+  value: hsvvalue(@c);
+  hsv: hsv(90, 100%, 50%);
+  hsva: hsva(90, 50%, 50%, 0.5);
+}
+.derived {
+  color-hex: color('#FF0000');
+  color-name: color(red);
+  argb: argb(@half);
+  argb-solid: argb(@c);
+}
+.strings {
+  replace: replace("hello world", "world", "less");
+  replace-global: replace("a-a-a", "a", "b", "g");
+  replace-flag-i: replace("Hello", "hello", "hi", "i");
+  format: %("%s-%d", "x", 7);
+  escaped: e("no-quotes");
+}
+.logic {
+  if-true: if(true, 10px, 20px);
+  if-false: if(false, 10px, 20px);
+  if-compare: if((2 > 1), red, blue);
+  boolean-true: boolean(1 = 1);
+  boolean-false: boolean(not(1 = 1));
+}
+.types {
+  isnumber: isnumber(5px);
+  iscolor: iscolor(#fff);
+  isstring: isstring("x");
+  iskeyword: iskeyword(abc);
+  ispixel: ispixel(5px);
+  ispercentage: ispercentage(5%);
+  isem: isem(5em);
+  isunit: isunit(5rem, rem);
+}
+.blend {
+  multiply: multiply(#ff6600, #0000ff);
+  screen: screen(#ff6600, #0000ff);
+  overlay: overlay(#ff6600, #0000ff);
+  softlight: softlight(#ff6600, #0000ff);
+  hardlight: hardlight(#ff6600, #0000ff);
+  difference: difference(#ff6600, #0000ff);
+  exclusion: exclusion(#ff6600, #0000ff);
+  average: average(#ff6600, #0000ff);
+  negation: negation(#ff6600, #0000ff);
+  alpha: multiply(rgba(255, 0, 0, 0.5), #0000ff);
+}
+.more-types {
+  isruleset: isruleset(5);
+  isdefined: isdefined(5);
+}

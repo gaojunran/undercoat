@@ -1,0 +1,18 @@
+@mixin shadow($x, $y: 2px)
+  box-shadow: $x $y #ccc
+
+@mixin hover
+  &:hover
+    color: #00f
+
+@function double($n)
+  @return $n * 2
+
+.a
+  width: double(4px)
+  @include shadow(1px)
+  @include hover
+
+.b
+  @include shadow(1px, 4px)
+  @include hover

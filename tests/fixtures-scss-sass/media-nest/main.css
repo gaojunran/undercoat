@@ -1,0 +1,16 @@
+.wrap {
+  color: #111;
+}
+@media (min-width: 700px) {
+  .wrap {
+    color: #222;
+  }
+  .wrap .inner {
+    color: #333;
+  }
+}
+@media print {
+  .wrap {
+    display: none;
+  }
+}

@@ -1,0 +1,25 @@
+// 实参里出现 var()/env()/min()/max()/clamp() 时，颜色函数整体透传成纯 CSS。
+.chip {
+  a: rgb(var(--bs-tertiary-color-rgb));
+  b: rgba(var(--c), .5);
+  c: rgba(0, 0, 0, var(--a));
+  d: hsla(var(--h), 100%, 67%, 0.1);
+  e: hsl(var(--h), 10%, 20%);
+  f: rgba(min(1, 2), 0, 0);
+  g: rgb(calc(1 + 2) 0 0);
+  h: rgba(max(1, 2), 0, 0, var(--alpha));
+  i: color(var(--x));
+}
+
+// 空格分隔写法同样透传。
+.space {
+  a: rgb(0 0 0 / var(--o));
+  b: hsl(var(--h) 50% 50%);
+}
+
+// 纯数字实参仍然按 Sass 颜色函数求值。
+.real {
+  a: rgb(0, 0, 0);
+  b: rgba(0, 0, 0, .5);
+  c: hsl(120, 50%, 50%);
+}

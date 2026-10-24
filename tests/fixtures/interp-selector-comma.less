@@ -1,0 +1,21 @@
+// 选择器插值带出逗号与 `&` 位置
+@classes: .a, .b, .c;
+@textClasses: ~'&[class="text"], &.text';
+
+.bar {
+  .d@{classes}&:hover, baz {
+    color: blue;
+  }
+}
+
+input {
+  @{textClasses} {
+    background: red;
+  }
+}
+
+.plain {
+  color: white ;
+  margin: 0 ;
+  e:   foo bar  ;
+}

@@ -1,0 +1,23 @@
+.types {
+  number: 10px;
+  color-literal: rebeccapurple;
+  hex: #ABCDEF;
+  string: "quoted";
+  bool: true;
+  null-in-list: 1 2;
+  list-space: 1px 2px;
+  list-comma: 1px, 2px;
+  list-bracket: [1px 2px];
+  map-get: 10px;
+  map-len: 2;
+  concat-string: "ab";
+  concat-number: "1x";
+  comparison: true;
+  equal: true;
+  truthy-zero: false;
+  truthy-empty: false;
+  truthy-null: true;
+  and-or: 42;
+  unknown-fn: sqrt(2);
+  passthrough: mystery(1, 2, 3);
+}

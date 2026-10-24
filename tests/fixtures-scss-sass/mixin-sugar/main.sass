@@ -1,0 +1,16 @@
+=size($w: 10px, $h: $w)
+  width: $w
+  height: $h
+
+=with-content
+  .inner
+    @content
+
+.box
+  +size
+  &.tall
+    +size(4px, 40px)
+
+.host
+  +with-content
+    color: #f00

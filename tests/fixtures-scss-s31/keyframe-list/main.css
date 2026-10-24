@@ -1,0 +1,18 @@
+@keyframes d {
+  0%, 50%, 100% {
+    opacity: 0;
+  }
+}
+@-webkit-keyframes e {
+  from, to {
+    x: 1;
+  }
+  to, 50% {
+    y: 2;
+  }
+}
+@keyframes f {
+  0%, 12.5% {
+    z: 3;
+  }
+}

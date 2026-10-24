@@ -1,0 +1,17 @@
+@mixin box($a, $b: 2px, $c: $a) {
+  first: $a;
+  second: $b;
+  third: $c;
+}
+
+.a {
+  @include box(1px);
+}
+
+.b {
+  @include box(1px, $c: 3px);
+}
+
+.c {
+  @include box($c: 9px, $a: 8px, $b: 7px);
+}

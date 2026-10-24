@@ -1,0 +1,5 @@
+{
+ "message": "Argument $a was passed both by position and by name.",
+ "line": 6,
+ "column": 2
+}

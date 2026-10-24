@@ -1,0 +1,7 @@
+@function noret($x) {
+  $y: $x * 2;
+}
+
+.r {
+  v: noret(1);
+}

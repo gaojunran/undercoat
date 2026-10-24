@@ -1,0 +1,44 @@
+.trig {
+  sin-deg: 0.5;
+  cos-deg: 0.5;
+  tan-deg: 1;
+  sin-rad: 0.84147098;
+  sin-grad: 1;
+  sin-turn: 1;
+  asin: 0.52359878rad;
+  acos: 0rad;
+  atan: 0.78539816rad;
+  sin-plain: 0.84147098;
+}
+.number {
+  pi: 3.14159265;
+  pow: 1024;
+  pow-unit: 4px;
+  sqrt: 5px;
+  mod: 1px;
+  mod-frac: 1;
+}
+.extremes {
+  min-number: 1;
+  max-number: 3;
+  min-unit: 1px;
+  max-unit: 1cm;
+  min-uncomparable: min(1px, 2em);
+  min-list: 1px;
+}
+.rounding {
+  ceil: 5px;
+  floor: 4px;
+  round: 5px;
+  round-precision: 1.23;
+  round-precision-zero: 2;
+  abs: 2.5em;
+}
+.units {
+  unit-strip: 5;
+  unit-set: 5em;
+  get-unit: rem;
+  convert: 10mm;
+  convert-angle: 3.14159265rad;
+  percentage: 50%;
+}

@@ -1,0 +1,41 @@
+.c,
+.b,
+.a {
+  width: 1px;
+}
+.b,
+.a {
+  height: 2px;
+}
+.a {
+  color: red;
+}
+.late {
+  a: 1;
+}
+.mid,
+.late {
+  b: 2;
+}
+.early,
+.mid,
+.late {
+  c: 3;
+}
+.tag,
+.pill,
+.chip {
+  border: 0;
+}
+.tag .label,
+.pill .label,
+.chip .label {
+  padding: 0;
+}
+.pill,
+.chip {
+  border-radius: 2px;
+}
+.chip {
+  background: gray;
+}

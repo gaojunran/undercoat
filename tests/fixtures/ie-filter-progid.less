@@ -1,0 +1,16 @@
+// IE 滤镜：`progid:` 路径是函数名的一部分，`key = value` 归一为 `key=value`
+@fat: 20;
+@cloudhead: "#000000";
+
+.nav {
+  filter: progid:DXImageTransform.Microsoft.Alpha(opacity=20);
+  filter: progid:DXImageTransform.Microsoft.Alpha(opacity=@fat);
+  filter: progid:DXImageTransform.Microsoft.gradient(startColorstr="#333333", endColorstr=@cloudhead, GradientType=0);
+}
+
+.evalTest {
+  .m(@arg) {
+    filter: progid:DXImageTransform.Microsoft.Alpha(opacity=@arg);
+  }
+  .m(30);
+}

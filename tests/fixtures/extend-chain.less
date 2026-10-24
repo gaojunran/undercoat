@@ -1,0 +1,33 @@
+// 链式：a extend b、b extend c 时闭包求值（扩展的扩展）
+.c {
+  width: 1px;
+}
+.b:extend(.c) {
+  height: 2px;
+}
+.a:extend(.b) {
+  color: red;
+}
+// 反向声明顺序：扩展定义在目标之前也成立
+.late:extend(.mid) {
+  a: 1;
+}
+.mid:extend(.early) {
+  b: 2;
+}
+.early {
+  c: 3;
+}
+// 链式 + all 混合
+.tag {
+  border: 0;
+}
+.tag .label {
+  padding: 0;
+}
+.pill:extend(.tag all) {
+  border-radius: 2px;
+}
+.chip:extend(.pill all) {
+  background: gray;
+}

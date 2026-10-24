@@ -1,0 +1,17 @@
+=frames($name)
+  @keyframes #{$name}
+    from
+      opacity: 0
+    to
+      opacity: 1
+
++frames(fade)
+
+.spin
+  animation: fade 1s
+
+@keyframes spinAround
+  0%
+    transform: rotate(0deg)
+  100%
+    transform: rotate(360deg)

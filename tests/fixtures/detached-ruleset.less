@@ -1,0 +1,55 @@
+// detached ruleset：定义 / 调用 / 传参 / 作用域
+@dr: {
+  color: red;
+  .inner { x: 1; }
+};
+
+.a { @dr(); }
+
+// 调用处的变量可见
+@outer: caller;
+
+.b {
+  @local: local;
+  @dr2: {
+    from-caller: @local;
+    from-outer: @outer;
+  };
+  @dr2();
+}
+
+// 调用方变量遮蔽定义处变量（less 实测：调用方优先）
+@closed: definition;
+@dr3: { closed: @closed; };
+.c {
+  @closed: shadowed-in-caller;
+  @dr3();
+}
+
+// 作为 mixin 参数传入，并在媒体块内展开
+.wrap(@rules) {
+  @media screen {
+    @rules();
+  }
+}
+.d {
+  .wrap({ media-inside: yes; });
+}
+
+// 参数默认值也是 detached ruleset
+.m(@a: {}; @b: {default: works;}) {
+  @a();
+  @b();
+}
+.e {
+  .m();
+  .m({direct: works;}; @b: {named: works;});
+}
+
+// 块内声明后调用
+.f {
+  @rules-2: {
+    b: 1;
+  };
+  @rules-2();
+}

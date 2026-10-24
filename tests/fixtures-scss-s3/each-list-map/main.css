@@ -1,0 +1,67 @@
+.m-4px {
+  margin: 4px;
+}
+
+.m-8px {
+  margin: 8px;
+}
+
+.m-12px {
+  margin: 12px;
+}
+
+.text-primary {
+  color: #007bff;
+}
+
+.text-danger {
+  color: #dc3545;
+}
+
+.pair {
+  content: primary #007bff;
+  key: primary;
+}
+
+.pair {
+  content: danger #dc3545;
+  key: danger;
+}
+
+.cell-1 {
+  span: 2;
+}
+
+.cell-3 {
+  span: 4;
+}
+
+.cell-5 {
+  span: 6;
+}
+
+.btn-primary {
+  background: #007bff;
+  color: #fff;
+}
+.btn-primary:hover {
+  background: #006fe6;
+}
+@media (min-width: 768px) {
+  .btn-primary {
+    padding: 4px;
+  }
+}
+
+.btn-danger {
+  background: #dc3545;
+  color: #000;
+}
+.btn-danger:hover {
+  background: #d32535;
+}
+@media (min-width: 768px) {
+  .btn-danger {
+    padding: 4px;
+  }
+}

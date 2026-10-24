@@ -1,0 +1,20 @@
+.x {
+  font-weight: bold;
+}
+.z {
+  /* 体内注释保留，且与声明紧凑拼接 */a: 1;b: 2;c: 3;
+}
+@media screen {
+  .y {
+    c: 3;
+  }
+}
+.x {
+  color: red;
+}
+.y {
+  own: 1;
+}
+.z {
+  z: 1;
+}

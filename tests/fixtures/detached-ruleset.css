@@ -1,0 +1,26 @@
+.a {
+  color: red;
+}
+.a .inner {
+  x: 1;
+}
+.b {
+  from-caller: local;
+  from-outer: caller;
+}
+.c {
+  closed: shadowed-in-caller;
+}
+@media screen {
+  .d {
+    media-inside: yes;
+  }
+}
+.e {
+  default: works;
+  direct: works;
+  named: works;
+}
+.f {
+  b: 1;
+}

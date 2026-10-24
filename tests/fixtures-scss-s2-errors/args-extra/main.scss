@@ -1,0 +1,7 @@
+@mixin m($a, $b) {
+  x: $a;
+}
+
+.r {
+  @include m(1, 2, 3);
+}

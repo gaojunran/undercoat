@@ -1,0 +1,36 @@
+// @function 定义 / 参数绑定 / 默认值引用前参 / 关键字实参 / 任意返回值。
+@function spacing($multiplier, $base: $multiplier * 4px) {
+  @return $base * $multiplier;
+}
+
+@function triple($a, $b: 2, $c: 3) {
+  @return $a $b $c;
+}
+
+@function shadow($x) {
+  @return (a: $x, b: $x * 2);
+}
+
+@function color-pick($c) {
+  @return if(lightness($c) > 50%, darken($c, 10%), lighten($c, 10%));
+}
+
+@function text($x) {
+  @return "value-#{$x}";
+}
+
+$m: map-merge((k: 1), (j: 2));
+
+.card {
+  padding: spacing(2);
+  margin: spacing(1, 8px);
+  ordered: triple(1, $c: 9);
+  keyed: triple($c: 5, $b: 4, $a: 3);
+  mapped: inspect(shadow(3));
+  nested: map-get(shadow(4), b);
+  picked: color-pick(#808080);
+  labelled: text(7);
+  merged: inspect($m);
+  length-3: length(triple(1, 2, 3));
+  interpolated: "computed: #{spacing(3, 1px)}";
+}

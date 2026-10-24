@@ -1,0 +1,16 @@
+@mixin respond($bp) {
+  @media (min-width: $bp) {
+    display: flex;
+  }
+  width: 100%;
+}
+
+.a {
+  @include respond(768px);
+}
+
+@media (min-width: 400px) {
+  .b {
+    @include respond(768px);
+  }
+}

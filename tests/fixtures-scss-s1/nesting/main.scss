@@ -1,0 +1,40 @@
+.card {
+  color: red;
+
+  &:hover {
+    color: blue;
+  }
+
+  &-title {
+    font-weight: bold;
+  }
+
+  .dark & {
+    color: white;
+  }
+
+  & + & {
+    margin-left: 1px;
+  }
+
+  &[data-on] {
+    outline: 1px solid;
+  }
+
+  .body,
+  .footer {
+    padding: 1px;
+  }
+}
+
+.grid, .flex {
+  &-item {
+    flex: 1;
+  }
+}
+
+.wrap {
+  .a & .b & {
+    color: green;
+  }
+}

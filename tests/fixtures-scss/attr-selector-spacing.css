@@ -1,0 +1,35 @@
+[id=modal] .bd-example .btn {
+  margin: 0;
+}
+
+[id=modal] .btn, [id=x] .btn {
+  margin: 0;
+}
+
+.a[x="1"] .b {
+  margin: 0;
+}
+
+[type=button] {
+  margin: 1px;
+}
+
+[class*=col-] .inner {
+  margin: 2px;
+}
+
+a[href^="https://"] > .icon {
+  margin: 3px;
+}
+
+input[type=text] + label {
+  margin: 4px;
+}
+
+[data-x="a b"] .y {
+  margin: 5px;
+}
+
+:not([hidden]) ~ .z {
+  margin: 6px;
+}

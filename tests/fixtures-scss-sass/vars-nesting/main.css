@@ -1,0 +1,16 @@
+@charset "UTF-8";
+/* 块注释 */
+.card {
+  color: #336699;
+  padding: 8px;
+}
+.card__title, .card__body {
+  margin: 0;
+}
+.card .btn,
+.card .link {
+  color: #336699;
+}
+.card:hover {
+  color: #000;
+}

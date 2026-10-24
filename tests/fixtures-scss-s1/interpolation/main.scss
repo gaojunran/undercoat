@@ -1,0 +1,33 @@
+$sel: header;
+$prop: margin;
+$side: left;
+$bp: 768px;
+$unit: px;
+$name: "quoted";
+
+#{$sel} > .row {
+  #{$prop}-#{$side}: 4px;
+  #{$prop}-right: #{2 + 2}px;
+  content: "#{$name}";
+  plain: #{$name};
+  bare: #{$sel};
+  joined: #{$sel}-part;
+  num: #{10 / 4}px;
+  nullable: #{null}x;
+  dash: -#{1 + 1};
+}
+
+#{$sel}-#{$side} {
+  color: red;
+}
+
+@media screen and (min-width: #{$bp}) {
+  .in-media {
+    width: #{$bp};
+  }
+}
+
+.multi,
+#{$sel} {
+  display: block;
+}

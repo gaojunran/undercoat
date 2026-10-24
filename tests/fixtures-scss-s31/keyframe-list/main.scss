@@ -1,0 +1,29 @@
+// keyframe 选择器列表没有换行概念：必须并成一条 `, ` 分隔的行。
+@keyframes d {
+  0%,
+  50%,
+  100% {
+    opacity: 0;
+  }
+}
+
+// `from` / `to` 与百分比混写、还有多余空白。
+@-webkit-keyframes e {
+  from,
+  to { x: 1 }
+  to,
+  50%
+  {
+    y: 2;
+  }
+}
+
+// 单行列表保持原样；层叠缩进（规则里的 keyframes）也不受影响。
+.a {
+  @keyframes f {
+    0%,
+    12.5% {
+      z: 3;
+    }
+  }
+}

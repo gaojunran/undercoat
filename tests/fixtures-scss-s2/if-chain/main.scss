@@ -1,0 +1,31 @@
+@mixin level($n) {
+  @if $n < 10 {
+    size: small;
+  } @else if $n < 100 {
+    size: medium;
+  } @else if $n >= 100 and $n < 1000 {
+    size: large;
+  } @else {
+    size: huge;
+  }
+}
+
+.a { @include level(5); }
+.b { @include level(50); }
+.c { @include level(500); }
+.d { @include level(5000); }
+
+@mixin truthy($value) {
+  @if $value {
+    truthy: yes;
+  } @else {
+    truthy: no;
+  }
+}
+
+.e { @include truthy(0); }
+.f { @include truthy(""); }
+.g { @include truthy(()); }
+.h { @include truthy(null); }
+.i { @include truthy(false); }
+.j { @include truthy(not false); }

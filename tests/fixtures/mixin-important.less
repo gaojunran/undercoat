@@ -1,0 +1,36 @@
+// 调用处 !important 递归作用于声明、嵌套规则与内层 mixin 调用
+.submixin(@a) {
+  border-width: @a;
+}
+
+.mixin() {
+  border: 1px;
+  boxer: 1;
+  .inner {
+    test: 1;
+  }
+  .submixin(2);
+}
+
+.class {
+  .mixin() !important;
+}
+
+.size(@w: auto) {
+  .set-width(@w) {
+    width: @w;
+  }
+  .set-width(@w);
+}
+
+.nested-important {
+  .size() !important;
+}
+
+.nested-important-arg {
+  .size(10px) !important;
+}
+
+.plain {
+  .mixin();
+}

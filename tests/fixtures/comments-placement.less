@@ -1,0 +1,29 @@
+// 块注释的归属：值内原位、属性名后丢弃、选择器内丢弃、at-rule 前后
+@base: 4px /* keep */;
+
+.bg {
+  background-image: linear-gradient(#333 /* stop */, #111);
+  margin/* drop */: 0;
+  pad: 1px /* mid */ 2px;
+  size: @base;
+}
+
+// selector 内与头部注释被 less 丢掉
+#planadvisor,
+/* drop */ .first,
+/* drop */.planning {
+  margin: 10px;
+}
+
+@media all and/*! */ (max-width: 1024px) {
+  .in-media {
+    a: b;
+  }
+}
+
+@-webkit-keyframes hover /* moved into block */ {
+}
+
+.last {
+  a: yes /* tail */;
+}

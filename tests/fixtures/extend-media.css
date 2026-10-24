@@ -1,0 +1,34 @@
+.screen-only,
+.outer {
+  color: blue;
+}
+@media screen {
+  .inside,
+  .inner {
+    color: red;
+  }
+  .inner {
+    border: 0;
+  }
+  .inner-all {
+    border: 1px;
+  }
+  .inner-miss {
+    border: 2px;
+  }
+}
+.outside {
+  color: green;
+}
+.outer {
+  background: black;
+}
+@media print {
+  .paper,
+  .paper-2 {
+    color: black;
+  }
+  .paper-2 {
+    margin: 0;
+  }
+}

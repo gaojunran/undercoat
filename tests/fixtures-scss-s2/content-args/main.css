@@ -1,0 +1,11 @@
+.a {
+  index: 1;
+  total: 3;
+  index: 2;
+  total: 3;
+}
+
+.b {
+  first: 1;
+  rest: 2, 3;
+}

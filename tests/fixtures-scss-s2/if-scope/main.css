@@ -1,0 +1,11 @@
+.a {
+  local: 2;
+}
+
+.b {
+  count: 10;
+}
+
+.c {
+  matched: yes;
+}

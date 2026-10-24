@@ -1,0 +1,24 @@
+.clearfix:before,
+.clearfix:after,
+.panel-title:before,
+.panel-title:after {
+  content: "";
+  display: table;
+}
+.panel .panel-body,
+.panel-body {
+  border: 1px solid #ddd;
+}
+.panel-title {
+  margin: 0;
+}
+.panel-body {
+  background: white;
+}
+[data-role="dialog"],
+.role-dialog {
+  z-index: 10;
+}
+.role-dialog {
+  position: fixed;
+}

@@ -1,0 +1,19 @@
+.part {
+  p: 1;
+}
+@media print {
+  .part-print {
+    q: 2;
+  }
+}
+.part {
+  p: 1;
+}
+@media print {
+  .part-print {
+    q: 2;
+  }
+}
+.a {
+  own: 1;
+}

@@ -1,0 +1,14 @@
+@n: foo;
+@q: "quoted";
+@sp: a b;
+@c: #333 + #111;
+
+.a {
+  content: "@{n}bar";
+  content-single: 'single @{n}';
+  content-escaped: ~"escaped @{n}";
+  content-quoted: "@{q}";
+  content-multi: "@{n}-@{n}";
+  content-color: "@{c}";
+  content-space-list: "@{sp}";
+}

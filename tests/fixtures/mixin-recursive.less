@@ -1,0 +1,22 @@
+// 有终止条件的递归 mixin（guard + 实参递减）
+.loop(@i) when (@i > 0) {
+  level: @i;
+  .loop(@i - 1);
+}
+.loop(@i) when (@i = 0) {
+  done: true;
+}
+
+.countdown {
+  .loop(3);
+}
+
+// 递归产出嵌套规则（选择器带插值）
+.steps(@i) when (@i > 0) {
+  .step-@{i} {
+    width: @i * 10px;
+  }
+  .steps(@i - 1);
+}
+
+.steps(3);

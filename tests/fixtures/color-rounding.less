@@ -1,0 +1,44 @@
+// 颜色函数 HSL 往返后的取整（B3）
+@brand: #337ab7;
+@brand-dark: darken(#428bca, 6.5%);
+
+.a {
+  color: darken(@brand, 10%);
+}
+.b {
+  color: lighten(@brand, 10%);
+}
+.c {
+  color: saturate(@brand, 10%);
+}
+.d {
+  color: desaturate(@brand, 10%);
+}
+.e {
+  color: spin(@brand, 10);
+}
+.f {
+  color: greyscale(@brand);
+}
+.g {
+  color: fadein(@brand, 10%);
+}
+.h {
+  color: fadeout(@brand, 10%);
+}
+// 链式调用必须保留中间浮点通道
+.i {
+  color: @brand-dark;
+}
+.j {
+  color: darken(@brand-dark, 15%);
+}
+.k {
+  color: darken(spin(#d9edf7, -10), 7%);
+}
+.l {
+  color: mix(#f2dede, #000, 20%);
+}
+.m {
+  color: fade(rgba(0, 0, 0, 0.8), 50%);
+}

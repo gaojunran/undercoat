@@ -1,0 +1,70 @@
+@charset "UTF-8";
+/*! 语句级注释保留 */
+.a {
+  width: 1px;
+}
+
+.b {
+  width: 1px;
+  color: red;
+}
+
+.c {
+  width: 1px;
+}
+
+.d {
+  width: 1px !important;
+}
+
+.e {
+  color: red;
+  /* 语句级 */
+}
+
+.f {
+  /* c1 */
+  color: red;
+  /* c2 */
+}
+
+.g {
+  /* only */
+}
+
+.h {
+  width: 1px;
+  height: 2px;
+}
+
+.i {
+  --x: 1px /* t */ 2px ;
+}
+
+.j {
+  font: 12px/1.5 sans-serif;
+}
+
+@media screen {
+  .k {
+    x: 1;
+  }
+
+  /* 语句级 */
+  .l {
+    y: 2;
+  }
+}
+@keyframes k {
+  from {
+    opacity: 0;
+  }
+  /* 语句级 */
+  to {
+    opacity: 1;
+  }
+}
+@font-face {
+  font-family: X;
+  src: url(a.woff);
+}

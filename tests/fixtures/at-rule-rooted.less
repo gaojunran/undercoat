@@ -1,0 +1,29 @@
+// 声明式 at-rule 的体是 root ruleset：父选择器不往里传播
+.onTop {
+  @font-face {
+    font-family: something;
+    src: made-up-url;
+  }
+
+  @keyframes "textscale" {
+    0% { font-size: 1em; }
+    100% { font-size: 2em; }
+  }
+
+  animation: "textscale";
+}
+
+// 空的媒体块整条丢掉
+@media (min-width: 600px) {
+}
+
+// 空 at-rule 块里有注释时保留
+@media (min-width: 700px) {
+  /* kept */
+}
+
+@supports (display: grid) {
+  .grid {
+    display: grid;
+  }
+}

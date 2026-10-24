@@ -1,0 +1,24 @@
+@import "plain.css";
+.token-rule {
+  margin: 4px;
+}
+
+.btn {
+  color: #336699;
+  padding: 4px;
+}
+
+.token-rule {
+  margin: 4px;
+}
+
+.component-index {
+  display: flex;
+}
+
+.with-rule .nested-part {
+  border: 1px solid #336699;
+}
+.with-rule {
+  color: #336699;
+}

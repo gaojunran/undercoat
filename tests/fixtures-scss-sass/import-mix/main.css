@@ -1,0 +1,12 @@
+.legacy {
+  color: #111;
+}
+
+.plain {
+  color: #333;
+}
+
+.root {
+  color: #333;
+  margin: 3px;
+}

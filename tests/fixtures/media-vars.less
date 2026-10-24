@@ -1,0 +1,32 @@
+// 媒体查询 prelude 里的变量求值（B3）
+@screen-sm-min: 768px;
+@screen-md-max: 991px;
+@query: (min-width: 768px) and (max-width: 991px);
+
+@media (min-width: @screen-sm-min) {
+  .a {
+    color: red;
+  }
+}
+
+@media @query {
+  .b {
+    color: blue;
+  }
+}
+
+@media screen and (min-width: @screen-sm-min) and (max-width: @screen-md-max) {
+  .c {
+    color: green;
+  }
+}
+
+// `~"@{a}/@{b}"` 拼接出裸值
+@ratio-a: 16;
+@ratio-b: 9;
+
+@media all and (device-aspect-ratio: ~'@{ratio-a} / @{ratio-b}') {
+  .d {
+    max-width: 800px;
+  }
+}

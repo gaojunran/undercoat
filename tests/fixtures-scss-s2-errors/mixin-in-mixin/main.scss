@@ -1,0 +1,5 @@
+@mixin outer {
+  @mixin inner {
+    a: 1;
+  }
+}

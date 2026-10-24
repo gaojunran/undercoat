@@ -1,0 +1,9 @@
+@use "theme" as t;
+@use "palette" as *;
+@use "theme" as again;
+
+.consumer {
+  color: t.$brand;
+  background: $accent;
+  border-color: again.$brand;
+}

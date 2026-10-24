@@ -1,0 +1,39 @@
+.a {
+  size: small;
+}
+
+.b {
+  size: medium;
+}
+
+.c {
+  size: large;
+}
+
+.d {
+  size: huge;
+}
+
+.e {
+  truthy: yes;
+}
+
+.f {
+  truthy: yes;
+}
+
+.g {
+  truthy: yes;
+}
+
+.h {
+  truthy: no;
+}
+
+.i {
+  truthy: no;
+}
+
+.j {
+  truthy: yes;
+}

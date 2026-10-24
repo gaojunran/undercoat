@@ -1,0 +1,15 @@
+.countdown {
+  level: 3;
+  level: 2;
+  level: 1;
+  done: true;
+}
+.step-3 {
+  width: 30px;
+}
+.step-2 {
+  width: 20px;
+}
+.step-1 {
+  width: 10px;
+}

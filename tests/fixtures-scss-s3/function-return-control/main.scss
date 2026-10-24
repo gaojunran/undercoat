@@ -1,0 +1,50 @@
+// @return 出现在控制流深处：@if / @each / @for / @while 里提前返回。
+@function find-first-key($map, $target) {
+  @each $k, $v in $map {
+    @if $v == $target {
+      @return $k;
+    }
+  }
+  @return null;
+}
+
+@function sum-until($limit) {
+  $total: 0;
+  @for $i from 1 through 10 {
+    $total: $total + $i;
+    @if $total > $limit {
+      @return $total;
+    }
+  }
+  @return $total;
+}
+
+@function countdown-return($n) {
+  @while $n > 0 {
+    @if $n == 2 {
+      @return "stopped at #{$n}";
+    }
+    $n: $n - 1;
+  }
+  @return "never";
+}
+
+@function nested-return($flag) {
+  @if $flag {
+    @if $flag == yes {
+      @return "inner";
+    }
+    @return "outer";
+  }
+  @return "none";
+}
+
+.r {
+  a: find-first-key((x: 1, y: 2, z: 3), 2);
+  b: inspect(find-first-key((x: 1), 9));
+  c: sum-until(20);
+  d: countdown-return(5);
+  e: nested-return(yes);
+  f: nested-return(true);
+  g: nested-return(false);
+}

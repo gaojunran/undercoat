@@ -1,0 +1,6 @@
+$a: a;
+$b: b;
+@mixin keep { k: 1 }
+@mixin drop { d: 1 }
+@function keep-fn() { @return kf; }
+@function drop-fn() { @return df; }

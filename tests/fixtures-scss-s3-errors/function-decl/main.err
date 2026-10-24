@@ -1,0 +1,5 @@
+{
+ "message": "@function rules may not contain declarations.",
+ "line": 2,
+ "column": 2
+}

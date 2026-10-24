@@ -1,0 +1,34 @@
+// 闭包：mixin 体看见定义处的变量，而不是调用处的同名变量
+.scope {
+  @var: 99px;
+  .mixin() {
+    width: @var;
+  }
+}
+
+.class {
+  .scope > .mixin();
+}
+
+.overwrite {
+  @var: 0px;
+  .scope > .mixin();
+}
+
+.nested {
+  @var: 5px;
+  .mixin() {
+    height: @var;
+  }
+  .class {
+    @var: 10px;
+    .mixin();
+  }
+}
+
+.dynamic {
+  .inner() {
+    color: @color;
+  }
+  @color: red;
+}

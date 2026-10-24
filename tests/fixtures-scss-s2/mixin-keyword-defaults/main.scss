@@ -1,0 +1,9 @@
+@mixin cta($bg: #fff, $fg: black, $pad: 4px) {
+  background: $bg;
+  color: $fg;
+  padding: $pad;
+}
+
+.a { @include cta($fg: red); }
+.b { @include cta(black, white); }
+.c { @include cta($pad: 8px, $bg: blue); }
