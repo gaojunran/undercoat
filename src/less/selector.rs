@@ -1,10 +1,10 @@
 use oxc_css_parser::ast::*;
 use oxc_css_parser::pos::Span;
 
+use super::Compiler;
 use super::eval::interp_tokens;
 use super::extend::{self, Need, Sel};
 use super::value;
-use super::Compiler;
 
 /// 把选择器文本拆成 less 的 mixin 元素 token（简单选择器，忽略组合子与伪类细节）。
 pub(super) fn selector_tokens(text: &str) -> Vec<String> {

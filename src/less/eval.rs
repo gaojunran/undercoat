@@ -5,9 +5,8 @@ use oxc_css_parser::ast::*;
 use oxc_css_parser::pos::Span;
 
 use super::emit::{ChildItem, Emit, Piece, Sink};
-use super::env::{
-    body_vars, CallArg, Candidate, Defs, Frames, Inject, MixinDef, RuleSet, Vars,
-};
+use super::env::{CallArg, Candidate, Defs, Frames, Inject, MixinDef, RuleSet, Vars, body_vars};
+use super::extend::Need;
 use super::guard::{self, Ctx, Val};
 use super::prelude::is_reference;
 use super::selector::{
@@ -16,7 +15,6 @@ use super::selector::{
 };
 use super::strip_embedded_important;
 use super::value::{self, Color, VarRef};
-use super::extend::Need;
 use super::{Child, Compiler, Head};
 
 /// 空格分隔的值列表在该实参里的元素（其余实参算一个元素）。
@@ -216,7 +214,11 @@ pub(super) fn chain_mask(prefix: &[bool], linkable: bool, len: usize) -> Vec<boo
 }
 
 /// 定义侧 token 链插值：`&` 是作用域占位 token，不再拆分。
-pub(super) fn interp_tokens<'a>(raw: &[String], src: &'a str, scope: &dyn value::Scope<'a>) -> Vec<String> {
+pub(super) fn interp_tokens<'a>(
+    raw: &[String],
+    src: &'a str,
+    scope: &dyn value::Scope<'a>,
+) -> Vec<String> {
     raw.iter()
         .flat_map(|t| match t.as_str() {
             "&" => vec!["&".to_string()],
@@ -391,7 +393,10 @@ impl<'a> Compiler<'a> {
     }
 
     /// `each` 的迭代项：规则集按声明拆成（属性名, 值）；找不到时退回空列表。
-    pub(super) fn each_items(&self, node: Option<&'a ComponentValue<'a>>) -> Vec<(Option<String>, String)> {
+    pub(super) fn each_items(
+        &self,
+        node: Option<&'a ComponentValue<'a>>,
+    ) -> Vec<(Option<String>, String)> {
         let Some(node) = node else {
             return Vec::new();
         };
@@ -429,7 +434,10 @@ impl<'a> Compiler<'a> {
     }
 
     /// 实参组的迭代项：逗号把组分成多项（项内是空格列表），否则组内每个值是一项。
-    pub(super) fn each_group_items(&self, group: &[&'a ComponentValue<'a>]) -> Vec<(Option<String>, String)> {
+    pub(super) fn each_group_items(
+        &self,
+        group: &[&'a ComponentValue<'a>],
+    ) -> Vec<(Option<String>, String)> {
         if group.len() == 1 {
             return self.each_items(group.first().copied());
         }
@@ -497,7 +505,10 @@ impl<'a> Compiler<'a> {
             .collect()
     }
 
-    pub(super) fn each_items_block(&self, block: &'a SimpleBlock<'a>) -> Vec<(Option<String>, String)> {
+    pub(super) fn each_items_block(
+        &self,
+        block: &'a SimpleBlock<'a>,
+    ) -> Vec<(Option<String>, String)> {
         // 体里的 `$prop` 引同块声明（less 把规则集自身当成一个帧）
         let env = self.env.with_props(self.block_props(block));
         block
@@ -695,7 +706,12 @@ impl<'a> Compiler<'a> {
     ///
     /// 同名定义存在（含递归自调用被过滤的情况）时是「没有匹配的定义」，
     /// 完全找不到名字时是「<selector> is undefined」。
-    pub(super) fn miss_mixin(&self, call: &'a LessMixinCall<'a>, tokens: &[String], args: &[CallArg<'a>]) {
+    pub(super) fn miss_mixin(
+        &self,
+        call: &'a LessMixinCall<'a>,
+        tokens: &[String],
+        args: &[CallArg<'a>],
+    ) {
         let callee = self.slice(call.callee.span).trim().to_string();
         let known = tokens.last().is_some_and(|name| {
             self.mixins
@@ -1288,7 +1304,12 @@ impl<'a> Compiler<'a> {
     /// `base` 是调用处的作用域长度：复制到调用处的规则相对于调用处可见。
     ///
     /// 同时把该规则块里的定义一并登记（less 在求值时就地展开，后续语句能立即看到）。
-    pub(super) fn register_dynamic(&mut self, sel: &SelectorList, block: &'a SimpleBlock<'a>, base: usize) {
+    pub(super) fn register_dynamic(
+        &mut self,
+        sel: &SelectorList,
+        block: &'a SimpleBlock<'a>,
+        base: usize,
+    ) {
         let lists = rule_selector_raw_lists(sel, self.src);
         let closure = Rc::new(self.env.snapshot());
         let parent_only = is_just_parent(sel, self.src);

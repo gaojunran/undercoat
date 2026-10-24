@@ -5,6 +5,8 @@ use oxc_css_parser::pos::Span;
 
 use super::comments::strip_block_comments;
 use super::env::Inject;
+use super::eval::Out;
+use super::extend::{self, Need, Sel};
 use super::imports::{is_css_path, split_import_options, split_quoted_path};
 use super::prelude::{
     at_rule_keeps_parents, is_hoisted_import, is_import, is_reference, is_remote,
@@ -13,12 +15,10 @@ use super::prelude::{
 use super::selector::{
     is_just_parent, scope_tokens, selector_tokens, split_interpolated, split_selectors, stmt_start,
 };
-use super::value::{self, eval, PropSource};
-use crate::{CompileError, Options};
-use super::eval::Out;
+use super::value::{self, PropSource, eval};
 use super::{Child, Compiler, Head, Layer, strip_embedded_important};
-use super::extend::{self, Need, Sel};
 use crate::doc::{AtRule as OutAtRule, Body, Comment, Decl, DeclItem, Item, Keyframe, Raw};
+use crate::{CompileError, Options};
 
 /// 一条可输出声明：带 mixin 注入作用域与 `!important` 强制位。
 #[derive(Clone)]
@@ -939,7 +939,10 @@ impl<'a> Compiler<'a> {
     }
 
     /// 本层属性表：同名多条保留全部（`$prop` 取最后一条或合并结果）。
-    pub(super) fn collect_props(&self, pieces: &[Piece<'a>]) -> HashMap<String, Vec<PropSource<'a>>> {
+    pub(super) fn collect_props(
+        &self,
+        pieces: &[Piece<'a>],
+    ) -> HashMap<String, Vec<PropSource<'a>>> {
         let mut map: HashMap<String, Vec<PropSource<'a>>> = HashMap::new();
         for piece in pieces {
             match piece {

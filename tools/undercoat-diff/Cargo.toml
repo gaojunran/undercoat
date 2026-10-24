@@ -1,0 +1,17 @@
+[package]
+name = "undercoat-diff"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Semantic CSS comparator used to verify undercoat against lessc / dart-sass"
+publish = false
+
+[[bin]]
+name = "undercoat-diff"
+path = "src/main.rs"
+
+[dependencies]
+oxc-css-parser.workspace = true
+serde_json.workspace = true

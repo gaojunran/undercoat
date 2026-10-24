@@ -7,7 +7,10 @@ use super::*;
 impl<'a> Converter<'a> {
     /// `@use`：注册命名空间（`as` / `as *`），`with` 配置交给目标模块。
     /// 语句本身不产出 CSS。
-    pub(super) fn use_rule(&mut self, at: &oxc_css_parser::ast::AtRule<'a>) -> Result<(), Box<CompileError>> {
+    pub(super) fn use_rule(
+        &mut self,
+        at: &oxc_css_parser::ast::AtRule<'a>,
+    ) -> Result<(), Box<CompileError>> {
         let spec = self.module_spec(at)?;
         let url = spec.path.as_str();
         let file = self.file_at(at.span.start);

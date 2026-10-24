@@ -98,7 +98,8 @@ fn anchors_cover_every_dart_sass_mapped_line() {
         dir.display()
     );
 
-    let expected = map_of(&std::fs::read_to_string(dir.join("main.map.json")).expect("main.map.json"));
+    let expected =
+        map_of(&std::fs::read_to_string(dir.join("main.map.json")).expect("main.map.json"));
     let ours = decode(map["mappings"].as_str().expect("mappings"));
     let reference = decode(expected["mappings"].as_str().expect("mappings"));
     let lines: Vec<&str> = css.split('\n').collect();
@@ -124,7 +125,10 @@ fn anchors_cover_every_dart_sass_mapped_line() {
         checked += 1;
     }
     // 用例本身要够大：多行选择器列表 / 插值选择器 / 注释续行 / keyframes / extend
-    assert!(checked >= 25, "用例覆盖的生成行太少（{checked}）：多行选择器列表 / 插值 / 注释 / keyframes / extend 都应覆盖到");
+    assert!(
+        checked >= 25,
+        "用例覆盖的生成行太少（{checked}）：多行选择器列表 / 插值 / 注释 / keyframes / extend 都应覆盖到"
+    );
 }
 
 #[test]
@@ -137,7 +141,11 @@ fn map_is_structurally_valid() {
         .iter()
         .map(|s| s.as_str().expect("source"))
         .collect();
-    assert_eq!(sources, ["main.scss"], "sources 应是相对 project_root 的形态");
+    assert_eq!(
+        sources,
+        ["main.scss"],
+        "sources 应是相对 project_root 的形态"
+    );
 
     // sourcesContent 与 sources 一一对应且不缺
     let contents: Vec<&str> = map["sourcesContent"]
@@ -154,7 +162,10 @@ fn map_is_structurally_valid() {
     let lines: Vec<&str> = css.split('\n').collect();
     let source_lines: Vec<Vec<&str>> = contents.iter().map(|c| c.split('\n').collect()).collect();
     let mappings = decode(map["mappings"].as_str().expect("mappings"));
-    assert!(mappings.len() <= lines.len(), "mappings 行数不应超过产物行数");
+    assert!(
+        mappings.len() <= lines.len(),
+        "mappings 行数不应超过产物行数"
+    );
     let mut total = 0;
     for (i, segs) in mappings.iter().enumerate() {
         let mut last_col = 0;
@@ -199,8 +210,8 @@ fn selector_list_continuation_lines_are_mapped() {
     assert_eq!(css, ".a,\n.b,\n.c > .d {\n  color: red;\n}");
     let mappings = decode(map["mappings"].as_str().expect("mappings"));
     for (i, expected_col) in [(0usize, 0u32), (1, 0), (2, 0)] {
-        let first = first_source(&mappings[i])
-            .unwrap_or_else(|| panic!("选择器第 {} 行没有映射", i + 1));
+        let first =
+            first_source(&mappings[i]).unwrap_or_else(|| panic!("选择器第 {} 行没有映射", i + 1));
         assert_eq!((first.1, first.2), (0, expected_col), "第 {} 行锚点", i + 1);
     }
     std::fs::remove_dir_all(&dir).ok();
@@ -219,7 +230,9 @@ fn interpolated_selector_line_is_mapped() {
     assert_eq!(css, ".q-a,\n.q-b {\n  color: red;\n}");
     let mappings = decode(map["mappings"].as_str().expect("mappings"));
     for i in [0usize, 1] {
-        let (line, col) = first_source(&mappings[i]).map(|(_, l, c)| (l, c)).expect("映射");
+        let (line, col) = first_source(&mappings[i])
+            .map(|(_, l, c)| (l, c))
+            .expect("映射");
         assert_eq!(
             (line, col),
             (1, 0),
@@ -244,7 +257,9 @@ fn comment_continuation_lines_are_mapped() {
     let mappings = decode(map["mappings"].as_str().expect("mappings"));
     assert!(mappings.len() >= 4, "注释的每一行都要有 segment");
     for segs in mappings.iter().take(4) {
-        let (line, col) = first_source(segs).map(|(_, l, c)| (l, c)).expect("注释行映射");
+        let (line, col) = first_source(segs)
+            .map(|(_, l, c)| (l, c))
+            .expect("注释行映射");
         assert_eq!((line, col), (0, 0), "注释续行都应锚到 `/*` 起点");
     }
     std::fs::remove_dir_all(&dir).ok();
@@ -260,9 +275,14 @@ fn at_rule_maps_to_the_at_sign() {
         ".w {\n  @media (min-width: 1px) {\n    color: red;\n  }\n}\n",
     );
     let (css, map) = compile_with_map(&dir);
-    assert_eq!(css, "@media (min-width: 1px) {\n  .w {\n    color: red;\n  }\n}");
+    assert_eq!(
+        css,
+        "@media (min-width: 1px) {\n  .w {\n    color: red;\n  }\n}"
+    );
     let mappings = decode(map["mappings"].as_str().expect("mappings"));
-    let (line, col) = first_source(&mappings[0]).map(|(_, l, c)| (l, c)).expect("映射");
+    let (line, col) = first_source(&mappings[0])
+        .map(|(_, l, c)| (l, c))
+        .expect("映射");
     assert_eq!((line, col), (1, 2), "`@media` 应锚到第 2 行的 `@`（列 2）");
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -279,7 +299,9 @@ fn keyframe_selector_list_stays_on_one_line() {
     let (css, map) = compile_with_map(&dir);
     assert_eq!(css, "@keyframes k {\n  0%, 50% {\n    opacity: 0;\n  }\n}");
     let mappings = decode(map["mappings"].as_str().expect("mappings"));
-    let (line, col) = first_source(&mappings[1]).map(|(_, l, c)| (l, c)).expect("映射");
+    let (line, col) = first_source(&mappings[1])
+        .map(|(_, l, c)| (l, c))
+        .expect("映射");
     assert_eq!((line, col), (1, 2), "keyframe 选择器锚到列表起点");
     assert!(mappings.len() <= 5, "mappings 行数不应超过产物行数");
     std::fs::remove_dir_all(&dir).ok();
@@ -290,8 +312,10 @@ fn temp_dir(tag: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    let dir =
-        std::env::temp_dir().join(format!("undercoat-map-{tag}-{}-{nanos}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!(
+        "undercoat-map-{tag}-{}-{nanos}",
+        std::process::id()
+    ));
     std::fs::create_dir_all(&dir).expect("mkdir temp");
     dir
 }

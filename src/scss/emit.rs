@@ -65,7 +65,10 @@ pub(super) fn has_content(stmts: &[Statement<'_>]) -> bool {
 }
 
 /// 静态容器校验：一次遍历整份（已合并的）样式表，与是否执行到无关。
-pub(super) fn validate_structure(merged: &Merged, stmts: &[Statement<'_>]) -> Result<(), Box<CompileError>> {
+pub(super) fn validate_structure(
+    merged: &Merged,
+    stmts: &[Statement<'_>],
+) -> Result<(), Box<CompileError>> {
     validate_block(merged, stmts, Nesting::default())
 }
 

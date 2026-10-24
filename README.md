@@ -1,57 +1,91 @@
-# Undercoat
+# undercoat
 
-原生 Rust 的 CSS 预处理器：同一套引擎同时编译 **Less** 与 **Sass/SCSS**，产物与参照实现
-逐字节一致，不需要 Node 运行时。
+A native Rust CSS preprocessor. One engine compiles both **Less** and **Sass/SCSS**,
+and its output is byte-compatible with the reference implementations — no Node runtime.
 
-名字取「底漆」之意：Undercoat 是 CSS 之下的那一层——把 Less / Sass 源样式压平成标准
-CSS，再交给浏览器渲染。
+The name is the paint layer beneath the finish: undercoat takes Less / Sass sources,
+flattens them into plain CSS, and hands them to the browser.
 
 ```console
 $ undercoat app.scss -o app.css --source-map
+$ undercoat app.less  -o app.css
 ```
 
-## 特点
+## Why
 
-- **两种方言，一条流水线**：`@import` / `@use` / `@forward` 装配、求值、`@extend`
-  展开、sourcemap 生成共用一套基础设施；方言差异只体现在值模型与 6 个输出形态开关上。
-- **逐字节对齐参照实现**：Less 对齐 lessc 4.1.3；SCSS 能力对齐 dart-sass 1.93.2、
-  输出形态对齐 1.35.2。bootstrap 4/5、Foundation、bulma、element-plus 等真实工程
-  作为回归语料。
-- **sourcemap 可反查**：多行选择器、注释续行、`@media` 内嵌规则逐行锚点，覆盖与
-  dart-sass 逐行相等。
-- **无 Node 依赖**：单二进制 / 纯库调用，适合嵌入构建工具或 CI。
+- **Two dialects, one pipeline.** `@import` / `@use` / `@forward` assembly, evaluation,
+  `@extend` resolution and source-map generation share one implementation. A dialect
+  differs only in its value model and six output-shape switches.
+- **Byte-compatible with the references.** Less targets `lessc` 4.1.3; SCSS targets
+  dart-sass language semantics at 1.93.2 and output shape at 1.35.2 (same input ⇒ the
+  same CSS text). Bootstrap 4/5, Foundation, Bulma and element-plus are part of the
+  regression corpus.
+- **Source maps you can trust.** Multi-line selector lists, comment continuations and
+  rules nested in `@media` all map line by line, matching dart-sass coverage.
+- **No Node.js.** A single binary or a plain library call — embeddable in build tools,
+  bundlers and CI.
 
-## 用法
+## Status
+
+Both dialects are usable today: `.less`, `.scss`, `.sass` and plain `.css` / `.wxss`.
+Known deviations are limited to text shape of colour/`calc()` rounding (numeric
+equivalents) and a few edge-case constructs that are reported as errors instead of
+silently emitting wrong CSS.
+
+## CLI
+
+```console
+$ undercoat <file.(less|scss|css|wxss)> [--source-map] [--project-root DIR] [-o OUT]
+```
+
+## Library
 
 ```rust
 use std::path::Path;
 use undercoat::{compile_file, Options};
 
 let opts = Options { paths: vec!["/abs/styles".into()], ..Default::default() };
-let out = compile_file(Path::new("/src/app.scss"), "@use 'sass:math'; a { width: math.div(1px, 3) }", &opts).unwrap();
+let out = compile_file(
+    Path::new("/src/app.scss"),
+    "@use 'sass:math'; a { width: math.div(1px, 3) }",
+    &opts,
+)
+.unwrap();
+
 println!("{}", out.css);
 ```
 
-`compile_file` 按文件后缀分流：`.less` 走 less 通道；`.scss` / `.sass` / `.css` /
-`.wxss` 走 SCSS 通道（`.sass` 缩进语法在装载期折成等义 SCSS 文本）。
-返回值 `Output` 含 `css`、可选的 sourcemap `map` 与依赖文件绝对路径 `deps`；
-错误统一为 `CompileError`（消息 + 源文件/行/列，解析期与求值期都尽量带上位置）。
-模块职责与两条链路的共享边界见 [`docs/architecture.md`](docs/architecture.md)。
+`compile_file` dispatches on the file extension: `.less` goes to the Less channel;
+`.scss` / `.sass` / `.css` / `.wxss` go to the SCSS channel (`.sass` indented syntax is
+folded into equivalent SCSS text at load time). `Output` carries `css`, an optional
+source map and the absolute paths of every dependency; errors are a `CompileError`
+with file / line / column.
 
-## 支持范围
+## Repository layout
 
-- **Less**：语义对齐 less 4.1.3（变量惰性求值、mixin/守卫、`@import` 内联、
-  detached ruleset、extend、`(reference)` 等导入选项）。
-- **SCSS / Sass**：能力基线是现代 dart-sass 1.93.2（模块系统、内置函数、
-  控制流、`@extend`、缩进语法），输出形态基线是 dart-sass 1.35.2——
-  即同一份输入的 CSS 文本与 1.35.2 逐字节一致。
-- **CSS**：`.css` / `.wxss` 走同一条通道，按原样完成变量与 `@import` 处理后输出。
+```
+src/                  the library (one module per concept, shared across dialects)
+  doc.rs              output IR + `Style` (the only place dialect shapes differ) + printer
+  merge.rs            merged-source string and offset segment table (imports, maps)
+  text.rs             byte-level scanning primitives
+  less/               Less front end: env, eval, selector, prelude, imports, comments, emit
+  scss/               SCSS front end: decls, flow, module_use, selector, prelude, emit
+tests/                golden / conformance / source-map suites
+docs/architecture.md  module responsibilities and the boundaries between dialects
+tools/undercoat-diff  semantic CSS comparator used for conformance runs
+```
 
-## 已知差异
+## Development
 
-与上述基线相比，残留差异集中在颜色与 `calc()` 的取整/化简形态（数值等价但文本不同），
-以及少数边界语法会显式报错而不是静默产出错误 CSS。
+```console
+$ cargo test            # unit + golden + conformance suites
+$ cargo run --bin undercoat -- tests/fixtures/<case>/main.scss -o /tmp/out.css
+```
+
+The conformance corpus (`bootstrap`, `foundation`, `bulma`, …) is not vendored; suites
+that need it take a directory via environment variable (for example
+`SCSS_SASS_CORPUS`) and are skipped when it is absent.
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).

@@ -1,9 +1,28 @@
+[workspace]
+members = ["tools/undercoat-diff"]
+resolver = "2"
+
+[workspace.package]
+version = "0.12.0"
+edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/gaojunran/undercoat"
+homepage = "https://github.com/gaojunran/undercoat"
+
+[workspace.dependencies]
+oxc-css-parser = "0.0.17"
+serde_json = "1"
+
 [package]
 name = "undercoat"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/undercoat"
 description = "Native Rust compiler for Less and Sass/SCSS — byte-compatible with lessc and dart-sass, no Node runtime"
 readme = "README.md"
 keywords = ["less", "sass", "scss", "css", "compiler"]
@@ -13,8 +32,8 @@ categories = ["compilers", "web-programming"]
 name = "undercoat"
 
 [dependencies]
-oxc-css-parser = "0.0.17"
-serde_json = "1"
+oxc-css-parser.workspace = true
+serde_json.workspace = true
 tracing = "0.1"
 
 [[bin]]

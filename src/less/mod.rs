@@ -32,8 +32,8 @@ use crate::{CompileError, Options, Output};
 
 use comments::collect_definition_spans;
 use emit::{ChildItem, Deferred, Piece, Sink};
-use env::{Defs, Env, Inject, Roots, Vars};
 pub(crate) use env::RuleSet;
+use env::{Defs, Env, Inject, Roots, Vars};
 use eval::collect_mixins;
 use extend::{Need, Sel};
 use imports::expand_imports;
@@ -100,7 +100,11 @@ pub(crate) struct Compiler<'a> {
     ref_ranges: Vec<(Vec<usize>, usize, usize)>,
 }
 
-pub(crate) fn compile(path: &Path, source: &str, opts: &Options) -> Result<Output, Box<CompileError>> {
+pub(crate) fn compile(
+    path: &Path,
+    source: &str,
+    opts: &Options,
+) -> Result<Output, Box<CompileError>> {
     // less 把 `@import` 当作文本级内联：导入的文件与宿主共享作用域。
     // 入口文件也按规范路径登记，否则 `a -> b -> a` 的循环导入会把入口再内联一次
     let mut seen = vec![path.canonicalize().unwrap_or_else(|_| path.to_path_buf())];
@@ -643,7 +647,7 @@ fn prune(
         .map(|&(_, start, end)| (start, end))
         .collect();
     // 从后往前删，前面的下标不失效。
-    mine.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+    mine.sort_unstable_by_key(|(start, _)| std::cmp::Reverse(*start));
     for (start, end) in mine {
         if start < end && end <= items.len() && !items[start..end].iter().any(has_visible_rule) {
             items.drain(start..end);

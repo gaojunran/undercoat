@@ -1021,11 +1021,9 @@ fn rgba_two_arg(name: &str, items: &[Value]) -> ValResult<Value> {
     }
     if is_var(second) {
         return Ok(match first {
-            Value::Color(color) => Value::Raw(format!(
-                "{name}({}, {})",
-                channels(color),
-                second.inspect()
-            )),
+            Value::Color(color) => {
+                Value::Raw(format!("{name}({}, {})", channels(color), second.inspect()))
+            }
             _ => passthrough(),
         });
     }

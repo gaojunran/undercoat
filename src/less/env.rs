@@ -6,12 +6,12 @@ use std::rc::Rc;
 use oxc_css_parser::ast::*;
 use oxc_css_parser::pos::Span;
 
+use super::Compiler;
 use super::emit::merge_groups;
 use super::eval::{callee_raw_tokens, param_name, params_of};
 use super::guard::Val;
 use super::selector::selector_tokens;
-use super::value::{self, eval, Color, PropSource, VarRef};
-use super::Compiler;
+use super::value::{self, Color, PropSource, VarRef, eval};
 
 /// 一层变量表（mixin 闭包与展开注入用）。
 pub(super) type Vars<'a> = HashMap<String, VarRef<'a>>;
@@ -146,7 +146,12 @@ impl<'a> Env<'a> {
         }
     }
     /// 同上，并记下值末尾的块注释（引用处带出）。
-    pub(super) fn set_var(&mut self, name: String, node: &'a ComponentValue<'a>, suffix: Option<String>) {
+    pub(super) fn set_var(
+        &mut self,
+        name: String,
+        node: &'a ComponentValue<'a>,
+        suffix: Option<String>,
+    ) {
         if let Some(f) = self.frames.last_mut() {
             f.vars.insert(name.clone(), VarRef::Ast(node));
             if let Some(suffix) = suffix {
@@ -333,7 +338,11 @@ pub(super) struct Candidate<'a> {
 
 impl<'a> Compiler<'a> {
     /// 值节点 → 规则集（detached ruleset / 无参 mixin 调用 / 变量 / 嵌套查找）。
-    pub(super) fn ruleset_of(&self, node: &'a ComponentValue<'a>, depth: usize) -> Option<RuleSet<'a>> {
+    pub(super) fn ruleset_of(
+        &self,
+        node: &'a ComponentValue<'a>,
+        depth: usize,
+    ) -> Option<RuleSet<'a>> {
         if depth > 8 {
             return None;
         }
@@ -451,7 +460,10 @@ impl<'a> Compiler<'a> {
     }
 
     /// 一层块自身的属性表（`$prop` / `[]` 查找用）。
-    pub(super) fn block_props(&self, block: &'a SimpleBlock<'a>) -> HashMap<String, Vec<PropSource<'a>>> {
+    pub(super) fn block_props(
+        &self,
+        block: &'a SimpleBlock<'a>,
+    ) -> HashMap<String, Vec<PropSource<'a>>> {
         let mut decls: HashMap<String, Vec<&'a Declaration<'a>>> = HashMap::new();
         for st in &block.statements {
             if let Statement::Declaration(d) = st {
@@ -516,7 +528,11 @@ impl<'a> Compiler<'a> {
         out
     }
 
-    pub(super) fn namespace_lookup(&self, ns: &'a LessNamespaceValue<'a>, depth: usize) -> Option<Lookup<'a>> {
+    pub(super) fn namespace_lookup(
+        &self,
+        ns: &'a LessNamespaceValue<'a>,
+        depth: usize,
+    ) -> Option<Lookup<'a>> {
         self.namespace_lookup_checked(ns, depth).ok()
     }
 
@@ -601,7 +617,12 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    pub(super) fn ruleset_var(&self, rs: &RuleSet<'a>, name: &str, depth: usize) -> Option<Lookup<'a>> {
+    pub(super) fn ruleset_var(
+        &self,
+        rs: &RuleSet<'a>,
+        name: &str,
+        depth: usize,
+    ) -> Option<Lookup<'a>> {
         let rules = self.flat_rules(rs, depth + 1);
         let rule = rules
             .iter()
@@ -632,7 +653,12 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    pub(super) fn ruleset_prop(&self, rs: &RuleSet<'a>, name: &str, depth: usize) -> Option<Lookup<'a>> {
+    pub(super) fn ruleset_prop(
+        &self,
+        rs: &RuleSet<'a>,
+        name: &str,
+        depth: usize,
+    ) -> Option<Lookup<'a>> {
         let rules = self.flat_rules(rs, depth + 1);
         let rule = rules.iter().rev().find(|r| {
             r.decl

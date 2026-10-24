@@ -46,7 +46,10 @@ impl<'a> Converter<'a> {
         Ok(out)
     }
 
-    pub(super) fn var_decl(&mut self, var: &SassVariableDeclaration<'a>) -> Result<(), Box<CompileError>> {
+    pub(super) fn var_decl(
+        &mut self,
+        var: &SassVariableDeclaration<'a>,
+    ) -> Result<(), Box<CompileError>> {
         if let Some(namespace) = &var.namespace {
             return Err(self.err(
                 namespace.span.start,
@@ -84,7 +87,10 @@ impl<'a> Converter<'a> {
         Ok(())
     }
 
-    pub(super) fn decl(&mut self, decl: &Declaration<'a>) -> Result<Option<Decl>, Box<CompileError>> {
+    pub(super) fn decl(
+        &mut self,
+        decl: &Declaration<'a>,
+    ) -> Result<Option<Decl>, Box<CompileError>> {
         let name_span = *decl.name.span();
         let mut name = self.decl_name(&decl.name)?;
         if let Some(prefix) = decl.name_prefix {

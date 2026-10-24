@@ -121,7 +121,11 @@ impl<'a> Loader<'a> {
     }
 
     /// 一个文件的完整内容（`@use` 依赖在前，随后是自身语句）；返回文件 id 与片段。
-    fn pieces_for(&mut self, path: &Path, scope: usize) -> Result<(u32, Vec<Part>), Box<CompileError>> {
+    fn pieces_for(
+        &mut self,
+        path: &Path,
+        scope: usize,
+    ) -> Result<(u32, Vec<Part>), Box<CompileError>> {
         let key = canonical(path);
         if self.stack.contains(&key) {
             return Err(CompileError::new(format!(
@@ -202,7 +206,7 @@ impl<'a> Loader<'a> {
                     None => default_namespace(&spec.path),
                 };
                 if namespace != "*" {
-                    if declared.iter().any(|name| *name == namespace) {
+                    if declared.contains(&namespace) {
                         return Err(self.error_at_text(
                             path,
                             &text,
@@ -336,7 +340,13 @@ impl<'a> Loader<'a> {
         }
     }
 
-    fn error_at_text(&self, path: &Path, text: &str, at: usize, message: &str) -> Box<CompileError> {
+    fn error_at_text(
+        &self,
+        path: &Path,
+        text: &str,
+        at: usize,
+        message: &str,
+    ) -> Box<CompileError> {
         let index = LineIndex::new(text);
         let (line, column) = index.line_col(at.min(text.len()), text);
         Box::new(CompileError {
@@ -879,7 +889,7 @@ fn word_at(text: &str, i: usize, word: &str) -> bool {
     after
         .chars()
         .next()
-        .map_or(true, |c| c.is_whitespace() || c == '(')
+        .is_none_or(|c| c.is_whitespace() || c == '(')
 }
 
 /// 从 `open`（必须是 `(`）找到配对的 `)`。

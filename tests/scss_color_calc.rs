@@ -22,7 +22,9 @@ fn decl(source: &str, name: &str) -> String {
         .lines()
         .find(|line| line.starts_with(&prefix))
         .unwrap_or_else(|| panic!("没有 {name}：\n{out}"));
-    line.trim_start_matches(&prefix).trim_end_matches(';').to_string()
+    line.trim_start_matches(&prefix)
+        .trim_end_matches(';')
+        .to_string()
 }
 
 #[test]

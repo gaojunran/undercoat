@@ -59,8 +59,7 @@ fn temp_dir(tag: &str) -> PathBuf {
         .duration_since(std::time::UNIX_EPOCH)
         .expect("clock")
         .as_nanos();
-    let dir =
-        std::env::temp_dir().join(format!("undercoat-{tag}-{}-{nanos}", std::process::id()));
+    let dir = std::env::temp_dir().join(format!("undercoat-{tag}-{}-{nanos}", std::process::id()));
     std::fs::create_dir_all(&dir).expect("mkdir temp");
     dir
 }

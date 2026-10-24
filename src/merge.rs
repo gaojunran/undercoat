@@ -176,7 +176,6 @@ impl Merged {
         self.index.get(&key).copied()
     }
 
-
     /// 追加一个子片（原 less `push_expanded` / scss `Loader::run` 的拼装）。
     pub(crate) fn append_part(&mut self, part: Part) {
         let base = self.text.len();
@@ -187,7 +186,6 @@ impl Merged {
             ..seg
         }));
     }
-
 
     /// 精确命中：偏移必须落在某个段内。
     pub(crate) fn locate_exact(&self, at: usize) -> Option<(u32, usize)> {
@@ -279,7 +277,6 @@ mod tests {
             .collect();
         (merged, ids)
     }
-
 
     #[test]
     fn append_part_spans_files() {

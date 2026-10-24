@@ -7,7 +7,11 @@ use super::*;
 impl<'a> Converter<'a> {
     /// `@media` prelude 里的值：媒体特性 `name: value` 的值当 SassScript 求值
     /// （dart 的 `MediaQuery.value` 就是表达式），求不出来时才退回裸 `$var` 代入。
-    pub(super) fn substitute_vars(&mut self, text: &str, base: usize) -> Result<String, Box<CompileError>> {
+    pub(super) fn substitute_vars(
+        &mut self,
+        text: &str,
+        base: usize,
+    ) -> Result<String, Box<CompileError>> {
         let bytes = text.as_bytes();
         let mut out = String::with_capacity(text.len());
         let mut i = 0;
@@ -62,7 +66,11 @@ impl<'a> Converter<'a> {
     }
 
     /// prelude 文本里的裸 `$var` 替换（`media_feature` 求值失败时的兜底）。
-    fn substitute_vars_fallback(&mut self, text: &str, base: usize) -> Result<String, Box<CompileError>> {
+    fn substitute_vars_fallback(
+        &mut self,
+        text: &str,
+        base: usize,
+    ) -> Result<String, Box<CompileError>> {
         let mut out = String::with_capacity(text.len());
         let mut chars = text.char_indices().peekable();
         while let Some((i, ch)) = chars.next() {

@@ -49,7 +49,11 @@ use self::selector::*;
 const MAX_MIXIN_DEPTH: usize = 256;
 
 /// 编译 SCSS / 纯 CSS。`path` 只用于报错、依赖解析与 sourcemap 的 `sources`。
-pub(crate) fn compile(path: &Path, source: &str, opts: &Options) -> Result<Output, Box<CompileError>> {
+pub(crate) fn compile(
+    path: &Path,
+    source: &str,
+    opts: &Options,
+) -> Result<Output, Box<CompileError>> {
     // ParserBuilder 会自行剥 BOM，这里先剥掉以保证 span 与本函数的 src 对齐。
     let source = source.strip_prefix('\u{feff}').unwrap_or(source);
     let Loaded {
@@ -804,7 +808,10 @@ impl<'a> Converter<'a> {
         Ok(())
     }
 
-    fn keyframe(&mut self, block: &'a KeyframeBlock<'a>) -> Result<Option<Item>, Box<CompileError>> {
+    fn keyframe(
+        &mut self,
+        block: &'a KeyframeBlock<'a>,
+    ) -> Result<Option<Item>, Box<CompileError>> {
         self.skip_comments(block.block.span.start);
         let selector = self.keyframe_selectors(block)?;
         let body = Body::Decls(self.decl_list(&block.block.statements, block.block.span.end)?);
