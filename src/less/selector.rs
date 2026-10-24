@@ -6,7 +6,7 @@ use super::eval::interp_tokens;
 use super::extend::{self, Need, Sel};
 use super::value;
 
-/// 把选择器文本拆成 less 的 mixin 元素 token（简单选择器，忽略组合子与伪类细节）。
+/// Splits selector text into less mixin element tokens (simple selectors; combinators and pseudo-class details are ignored).
 pub(super) fn selector_tokens(text: &str) -> Vec<String> {
     let bytes = text.as_bytes();
     let mut tokens = Vec::new();
@@ -19,7 +19,7 @@ pub(super) fn selector_tokens(text: &str) -> Vec<String> {
             while i < bytes.len() {
                 let c = bytes[i] as char;
                 if c == '\\' {
-                    // `.\31 23` 这类转义整体保留
+                    // Keep escapes like `.\31 23` whole
                     i += 2;
                 } else if c.is_alphanumeric() || c == '_' || c == '-' {
                     i += 1;
@@ -27,7 +27,7 @@ pub(super) fn selector_tokens(text: &str) -> Vec<String> {
                     break;
                 }
             }
-            // 转义/多字节字符可能让 `i` 落在字符中间：退到最近的 char 边界
+            // Escapes/multibyte characters can leave `i` mid-character: back up to the nearest char boundary
             let end = (start..=i.min(text.len()))
                 .rev()
                 .find(|&k| text.is_char_boundary(k))
@@ -44,7 +44,7 @@ pub(super) fn selector_tokens(text: &str) -> Vec<String> {
     tokens
 }
 
-/// 作用域 token：`&`-only 选择器自身没有 token，但仍需占一层作用域（内部定义不外泄）。
+/// Scope token: an `&`-only selector has no tokens of its own but still occupies a scope level (inner definitions must not leak).
 pub(super) fn scope_tokens(own: Vec<String>) -> Vec<String> {
     if own.is_empty() {
         vec!["&".to_string()]
@@ -53,7 +53,7 @@ pub(super) fn scope_tokens(own: Vec<String>) -> Vec<String> {
     }
 }
 
-/// 规则的所有选择器原文（每个选择器整段保留，插值后才切 token）。
+/// Raw text of all selectors of a rule (each selector is kept whole; tokens are split only after interpolation).
 pub(super) fn rule_selector_raw_lists(sel: &SelectorList, src: &str) -> Vec<Vec<String>> {
     sel.selectors
         .iter()
@@ -63,7 +63,7 @@ pub(super) fn rule_selector_raw_lists(sel: &SelectorList, src: &str) -> Vec<Vec<
         .collect()
 }
 
-/// 规则自身的选择器 token（插值后，多个选择器取第一个）。
+/// The rule's own selector tokens (after interpolation; the first selector is used when there are several).
 pub(super) fn rule_own_tokens<'a>(
     sel: &SelectorList,
     src: &'a str,
@@ -76,7 +76,7 @@ pub(super) fn rule_own_tokens<'a>(
         .unwrap_or_default()
 }
 
-/// 选择器是否只有一个 `&`（less `isJustParentSelector`：折进父规则）。
+/// Whether the selector is exactly one `&` (less `isJustParentSelector`: folded into the parent rule).
 pub(super) fn is_just_parent(sel: &SelectorList, src: &str) -> bool {
     sel.selectors.len() == 1
         && sel
@@ -87,7 +87,7 @@ pub(super) fn is_just_parent(sel: &SelectorList, src: &str) -> bool {
             .unwrap_or(false)
 }
 
-/// 选择器列表展开：插值得到的逗号串要拆成多个选择器（less `SelectorList` 逐个换行）。
+/// Selector list expansion: comma strings produced by interpolation are split into multiple selectors (less `SelectorList` puts each on its own line).
 pub(super) fn split_selectors(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut start = 0;
@@ -130,8 +130,8 @@ pub(super) fn stmt_start(st: &Statement) -> Option<usize> {
     }
 }
 
-/// 父 × 子 组合：已由 `extend::combine` 完成（按 less `joinSelector`）。
-/// 插值带出的逗号仍要拆成多条选择器。
+/// Parent × child combination: already done by `extend::combine` (following less `joinSelector`).
+/// Commas introduced by interpolation must still be split into several selectors.
 pub(super) fn split_interpolated(sel: Sel) -> Vec<Sel> {
     let text = extend::render(&sel);
     match split_selectors(&text) {
@@ -140,9 +140,9 @@ pub(super) fn split_interpolated(sel: Sel) -> Vec<Sel> {
     }
 }
 
-/// 组合子文本（与 less `Combinator.value` 一致）。
+/// Combinator text (matching less `Combinator.value`).
 ///
-/// less 的 slashed combinator 是任意的 `/name/`（`/shadow/`），只能从源文本取。
+/// A less slashed combinator is an arbitrary `/name/` (`/shadow/`), so it can only be taken from the source text.
 pub(super) fn combinator_text(c: &Combinator, src: &str) -> String {
     if matches!(c.kind, CombinatorKind::Slashed) {
         return src.get(c.span.start..c.span.end).unwrap_or("/").to_string();
@@ -160,7 +160,7 @@ pub(super) fn combinator_text(c: &Combinator, src: &str) -> String {
     }
 }
 
-/// 下一个元素该带的组合子（复合选择器内部元素无组合子）。
+/// Combinator to attach to the next element (elements inside a compound selector have none).
 pub(super) fn element_combinator(
     pending: &mut Option<String>,
     first: &mut bool,
@@ -178,14 +178,14 @@ pub(super) fn element_combinator(
 }
 
 impl<'a> Compiler<'a> {
-    /// 选择器列表 → 展平后的元素序列（每条路径同时带出它的 `:extend(...)`）。
+    /// Selector list → flattened element sequence (each path also yields its `:extend(...)`).
     pub(super) fn selector_sels(&mut self, sel: &SelectorList) -> Vec<(Sel, Vec<Need>, Span)> {
         let mut out = Vec::with_capacity(sel.selectors.len());
         for complex in &sel.selectors {
             let complex_span = complex.span;
             let mut elements: Sel = Vec::new();
             let mut needs: Vec<Need> = Vec::new();
-            // 组合子等到下一个复合选择器落地（与 less 的 Element.combinator 同构）
+            // The combinator waits for the next compound selector to land (isomorphic to less's Element.combinator)
             let mut pending: Option<String> = None;
             for child in &complex.children {
                 match child {
@@ -203,7 +203,7 @@ impl<'a> Compiler<'a> {
                                 continue;
                             }
                             if let SimpleSelector::Nesting(n) = simple {
-                                // `&-suffix` 是「`&` 元素 + 后缀元素」，不能并成一个
+                                // `&-suffix` is "a `&` element + a suffix element" and must not merge into one
                                 let combinator = element_combinator(
                                     &mut pending,
                                     &mut first,
@@ -233,7 +233,7 @@ impl<'a> Compiler<'a> {
                             }
                             let span = *simple.span();
                             let text = self.interpolate_at(self.slice(span), span);
-                            // less 的 `Element` 对字符串值做 trim（转义序列末尾的空格会被去掉）
+                            // less's `Element` trims string values (trailing spaces in escape sequences are removed)
                             let text = text.trim();
                             if text.is_empty() {
                                 continue;
@@ -253,7 +253,7 @@ impl<'a> Compiler<'a> {
         out
     }
 
-    /// `:extend(...)` 参数列表 → 匹配需求。
+    /// `:extend(...)` argument list → match needs.
     pub(super) fn needs_of(&self, list: &LessExtendList<'_>) -> Vec<Need> {
         list.elements
             .iter()

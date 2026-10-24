@@ -1,22 +1,22 @@
-//! 涉及文件的内置函数：`data-uri`、`image-size` / `image-width` / `image-height`、
-//! `svg-gradient`。
+//! File-related built-in functions: `data-uri`, `image-size` / `image-width` / `image-height`,
+//! and `svg-gradient`.
 //!
-//! 对拍基线 less@4.1.3：`functions/data-uri.js`、`less-node/image-size.js`
-//! （依赖 image-size@0.5.5）、`functions/svg.js`。文件按 less 的 `entryPath` 语义
-//! 相对**入口 less 文件所在目录**解析（不是进程 cwd），再依次尝试 `paths`。
+//! Conformance baseline less@4.1.3: `functions/data-uri.js`, `less-node/image-size.js`
+//! (depending on image-size@0.5.5), and `functions/svg.js`. Files are resolved per less's `entryPath` semantics
+//! relative to **the directory of the entry less file** (not the process cwd), then `paths` is tried in order.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::value::{Color, fmt_number, parse_color, split_ws, unquote_ref};
 
-/// `image-size` 的产物：less 拼成 `Dimension(width,'px') Dimension(height,'px')`。
+/// Output of `image-size`: less formats it as `Dimension(width,'px') Dimension(height,'px')`.
 pub(crate) struct Size {
     pub(crate) width: i64,
     pub(crate) height: i64,
 }
 
-/// 按 less `file-manager` 的顺序查找文件：绝对路径直接用，否则先入口目录再 `paths`。
+/// Looks up a file in less `file-manager` order: absolute paths are used directly, otherwise the entry directory first and then `paths`.
 fn locate(dir: &Path, paths: &[PathBuf], file: &str) -> Option<PathBuf> {
     let rel = Path::new(file);
     if rel.is_absolute() {
@@ -28,34 +28,34 @@ fn locate(dir: &Path, paths: &[PathBuf], file: &str) -> Option<PathBuf> {
         .find(|candidate| candidate.is_file())
 }
 
-/// `data-uri([mime,] path)`：把文件内联成 `url("data:<mime>,<data><fragment>")`。
+/// `data-uri([mime,] path)`: inlines the file as `url("data:<mime>,<data><fragment>")`.
 ///
-/// 缺文件时按 less 回退成 `url(<原 path 节点>)`（保留原有引号形态）。
+/// When the file is missing, falls back as less does to `url(<original path node>)` (keeping the original quoting).
 pub(crate) fn data_uri(dir: &Path, paths: &[PathBuf], args: &[String]) -> Option<String> {
     let (mime, file) = match args {
         [file] => (None, unquote_ref(file)),
         [mime, file] => (Some(unquote_ref(mime)), unquote_ref(file)),
         _ => return None,
     };
-    // less：`#fragment` 不参与查找与类型推断，原样拼在 data 之后
+    // less: `#fragment` takes no part in lookup or type inference and is appended to the data verbatim
     let (path, fragment) = match file.find('#') {
         Some(i) => (&file[..i], &file[i..]),
         None => (file, ""),
     };
     let fallback = || Some(format!("url({})", args.last()?));
     let Some(found) = locate(dir, paths, path) else {
-        tracing::warn!("data-uri: 找不到 {path}，按 less 回退为 url()");
+        tracing::warn!("data-uri: cannot find {path}, falling back to url() as less does");
         return fallback();
     };
     let Ok(bytes) = fs::read(&found) else {
         return fallback();
     };
     let (mime, base64) = match mime {
-        // 显式 mime：只有 `;base64` 结尾才 base64 编码（less 的判断）
+        // Explicit mime: base64 encoding only when it ends with `;base64` (less's check)
         Some(mime) => (mime.to_string(), mime.ends_with(";base64")),
         None => {
             let mime = mime_lookup(path);
-            // svg 与 ASCII/UTF-8 文本走 encodeURIComponent，其余 base64
+            // svg and ASCII/UTF-8 text use encodeURIComponent, everything else base64
             let base64 = mime != "image/svg+xml" && !is_utf8_charset(mime);
             let mime = if base64 {
                 format!("{mime};base64")
@@ -73,7 +73,7 @@ pub(crate) fn data_uri(dir: &Path, paths: &[PathBuf], args: &[String]) -> Option
     Some(format!("url(\"data:{mime},{data}{fragment}\")"))
 }
 
-/// `image-size` / `image-width` / `image-height`：读图片头取宽高。
+/// `image-size` / `image-width` / `image-height`: read the image header for width and height.
 pub(crate) fn image_size(dir: &Path, paths: &[PathBuf], arg: &str) -> Option<Size> {
     let file = unquote_ref(arg);
     let file = file.split('#').next().unwrap_or(file);
@@ -82,7 +82,7 @@ pub(crate) fn image_size(dir: &Path, paths: &[PathBuf], arg: &str) -> Option<Siz
     sniff(&bytes)
 }
 
-/// 按文件头识别格式（less 的 image-size 也不看扩展名）。
+/// Detects the format from the file header (less's image-size also ignores the extension).
 fn sniff(data: &[u8]) -> Option<Size> {
     if data.starts_with(b"\x89PNG\r\n\x1a\n") {
         png(data)
@@ -95,7 +95,7 @@ fn sniff(data: &[u8]) -> Option<Size> {
     }
 }
 
-/// PNG：IHDR 的宽高是偏移 16/20 的两个大端 u32；CgBI（"fried" png）后移一个块。
+/// PNG: the width and height in IHDR are two big-endian u32 at offsets 16/20; CgBI ("fried" png) shifts by one chunk.
 fn png(data: &[u8]) -> Option<Size> {
     let be32 = |at: usize| -> Option<i64> {
         let b = data.get(at..at + 4)?;
@@ -116,7 +116,7 @@ fn png(data: &[u8]) -> Option<Size> {
     })
 }
 
-/// GIF：逻辑屏幕描述符里的两个小端 u16。
+/// GIF: two little-endian u16 in the logical screen descriptor.
 fn gif(data: &[u8]) -> Option<Size> {
     let le16 = |at: usize| -> Option<i64> {
         let b = data.get(at..at + 2)?;
@@ -128,7 +128,7 @@ fn gif(data: &[u8]) -> Option<Size> {
     })
 }
 
-/// JPEG：逐段跳过，在 SOF（C0–CF，排除 C4/C8/CC）里读高、宽。
+/// JPEG: skip segments one by one and read the height and width from SOF (C0–CF, excluding C4/C8/CC).
 fn jpeg(data: &[u8]) -> Option<Size> {
     let u16_at = |at: usize| -> Option<usize> {
         let b = data.get(at..at + 2)?;
@@ -137,12 +137,12 @@ fn jpeg(data: &[u8]) -> Option<Size> {
     let mut at = 2;
     while at + 1 < data.len() {
         if data[at] != 0xFF {
-            // 段间允许 0xFF 填充字节（image-size 0.5.5 直接放弃，这里更宽容）
+            // 0xFF padding bytes are allowed between segments (image-size 0.5.5 gives up here; this is more lenient)
             at += 1;
             continue;
         }
         let marker = data[at + 1];
-        // 无长度字段的独立标记
+        // Standalone markers without a length field
         if marker == 0x01 || (0xD0..=0xD9).contains(&marker) {
             at += 2;
             continue;
@@ -161,13 +161,13 @@ fn jpeg(data: &[u8]) -> Option<Size> {
     None
 }
 
-/// SVG：扫 `<svg …>` 的 `width` / `height` / `viewBox`（image-size 0.5.5 的规则：
-/// 宽高齐备直接用，否则按 `viewBox` 比例补齐缺失的一边）。
+/// SVG: scan the `width` / `height` / `viewBox` of `<svg …>` (image-size 0.5.5 rules:
+/// use them directly when both width and height are present, otherwise derive the missing side from the `viewBox` ratio).
 fn svg(data: &[u8]) -> Option<Size> {
     let capped = &data[..data.len().min(128 * 1024)];
     let text = String::from_utf8_lossy(capped);
     let tag = svg_tag(&text)?;
-    // image-size 的 `width`/`height` 正则跳过百分比值（`[^%]+?`），交回 viewBox 推算
+    // image-size's `width`/`height` regex skips percentage values (`[^%]+?`) and falls back to the viewBox
     let dim = |name| {
         svg_attr(tag, name)
             .filter(|v| !v.contains('%'))
@@ -203,7 +203,7 @@ fn svg(data: &[u8]) -> Option<Size> {
 fn svg_tag(text: &str) -> Option<&str> {
     let start = text.find("<svg")?;
     let rest = &text[start..];
-    // 必须紧跟空白或 `>`，避免匹配 `<svgfoo`
+    // Must be followed by whitespace or `>` so `<svgfoo` does not match
     let next = rest[4..].chars().next()?;
     if !(next.is_whitespace() || next == '>') {
         return None;
@@ -211,7 +211,7 @@ fn svg_tag(text: &str) -> Option<&str> {
     Some(&rest[..rest.find('>')? + 1])
 }
 
-/// 引号属性值；`name` 前不能是标识符字符（等价 image-size 的 `\b`）。
+/// Quoted attribute value; `name` must not be preceded by an identifier character (equivalent to image-size's `\b`).
 fn svg_attr<'a>(tag: &'a str, name: &str) -> Option<&'a str> {
     let bytes = tag.as_bytes();
     let mut from = 0;
@@ -238,7 +238,7 @@ fn is_ident_byte(b: u8) -> bool {
     b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b':' | b'.')
 }
 
-/// `parseInt` 的前缀语义：`100px` → 100，`50%` → 50，非数字开头 → None。
+/// `parseInt` prefix semantics: `100px` → 100, `50%` → 50, non-digit start → None.
 fn leading_int(value: &str) -> Option<i64> {
     let digits: String = value
         .trim()
@@ -248,7 +248,7 @@ fn leading_int(value: &str) -> Option<i64> {
     digits.parse().ok()
 }
 
-/// `svg-gradient(direction, [color [position], …])`：less `functions/svg.js`。
+/// `svg-gradient(direction, [color [position], …])`: less `functions/svg.js`.
 pub(crate) fn svg_gradient(args: &[String]) -> Option<String> {
     let (kind, direction, rect) = match args.first()?.trim() {
         "to bottom" => (
@@ -276,7 +276,7 @@ pub(crate) fn svg_gradient(args: &[String]) -> Option<String> {
             "cx=\"50%\" cy=\"50%\" r=\"75%\"",
             "x=\"-50\" y=\"-50\" width=\"101\" height=\"101\"",
         ),
-        // less 对未知方向抛错；这里保留原调用文本
+        // less throws on an unknown direction; the original call text is preserved here
         _ => return None,
     };
     let stops = args.get(1..)?;
@@ -296,7 +296,7 @@ pub(crate) fn svg_gradient(args: &[String]) -> Option<String> {
             _ => return None,
         };
         let last = i + 1 == stops.len();
-        // 首尾可省略位置；中间的色标必须带位置（less 的校验）
+        // The first and last stops may omit positions; middle stops must have one (less's validation)
         if position.is_none() && !last && i != 0 {
             return None;
         }
@@ -319,7 +319,7 @@ pub(crate) fn svg_gradient(args: &[String]) -> Option<String> {
     ))
 }
 
-/// less `Color.toRGB()`：`#rrggbb`（通道四舍五入并夹到 0..255）。
+/// less `Color.toRGB()`: `#rrggbb` (channels rounded and clamped to 0..255).
 fn hex_of(color: Color) -> String {
     let channel = |v: f64| v.round().clamp(0.0, 255.0) as u8;
     format!(
@@ -330,7 +330,7 @@ fn hex_of(color: Color) -> String {
     )
 }
 
-/// `mime@1.6.0` 的子集（less node 环境用它推断 data-uri 的 MIME）。
+/// Subset of `mime@1.6.0` (used by the less node environment to infer the data-uri MIME type).
 fn mime_lookup(file: &str) -> &'static str {
     let ext = file
         .rsplit(['.', '/', '\\'])
@@ -376,7 +376,7 @@ fn mime_lookup(file: &str) -> &'static str {
     }
 }
 
-/// `mime@1.6.0` 的 `charsets.lookup`：这些类型按 UTF-8 文本内联（不 base64）。
+/// `charsets.lookup` from `mime@1.6.0`: these types are inlined as UTF-8 text (no base64).
 fn is_utf8_charset(mime: &str) -> bool {
     mime.starts_with("text/")
         || mime
@@ -384,7 +384,7 @@ fn is_utf8_charset(mime: &str) -> bool {
             .is_some_and(|rest| rest.starts_with("javascript") || rest.starts_with("json"))
 }
 
-/// JS `encodeURIComponent`：保留 `A-Za-z0-9-_.!~*'()`，其余按 UTF-8 字节转 `%XX`。
+/// JS `encodeURIComponent`: keep `A-Za-z0-9-_.!~*'()`, percent-encode the other UTF-8 bytes as `%XX`.
 fn encode_uri_component(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for b in text.bytes() {
@@ -451,7 +451,7 @@ mod tests {
 
     #[test]
     fn jpeg_size() {
-        // SOI + APP0(JFIF, 16 字节) + SOF0(高 430 / 宽 640) + EOI
+        // SOI + APP0(JFIF, 16 bytes) + SOF0(height 430 / width 640) + EOI
         let mut data = vec![0xFF, 0xD8];
         data.extend_from_slice(&[0xFF, 0xE0, 0x00, 0x10]);
         data.extend_from_slice(b"JFIF\0\x01\x01\0\0\x01\0\x01\0\0");
@@ -470,7 +470,7 @@ mod tests {
         let size = sniff(data).expect("svg");
         assert_eq!((size.width, size.height), (12, 34));
 
-        // 只有 viewBox：按比例补另一边
+        // Only a viewBox: derive the other side from the ratio
         let data = br#"<svg viewBox="0 0 60 30" width="20"></svg>"#;
         let size = sniff(data).expect("svg viewbox");
         assert_eq!((size.width, size.height), (20, 10));
@@ -485,7 +485,7 @@ mod tests {
         fs::write(dir.join("noext"), "zz").expect("write");
         let arg = |s: &str| s.to_string();
 
-        // 文本类型：encodeURIComponent，不 base64
+        // Text type: encodeURIComponent, no base64
         assert_eq!(
             data_uri(&dir, &[], &[arg("'a.txt'")]).as_deref(),
             Some("url(\"data:text/plain,hi\")")
@@ -496,22 +496,22 @@ mod tests {
                 "url(\"data:image/svg+xml,%3Csvg%20version%3D%221.1%22%3E%3Cg%3E%3C%2Fg%3E%3C%2Fsvg%3E\")"
             )
         );
-        // 二进制：推断 mime + base64（7 字节 → 末字节补一个 `=`）
+        // Binary: infer mime + base64 (7 bytes → last byte padded with one `=`)
         assert_eq!(
             data_uri(&dir, &[], &[arg("'a.png'")]).as_deref(),
             Some("url(\"data:image/png;base64,iVBORwECAw==\")")
         );
-        // 未知扩展名 → application/octet-stream
+        // Unknown extension → application/octet-stream
         assert_eq!(
             data_uri(&dir, &[], &[arg("'noext'")]).as_deref(),
             Some("url(\"data:application/octet-stream;base64,eno=\")")
         );
-        // 显式 mime
+        // Explicit mime
         assert_eq!(
             data_uri(&dir, &[], &[arg("'text/html'"), arg("'a.txt'")]).as_deref(),
             Some("url(\"data:text/html,hi\")")
         );
-        // 缺文件 → 回退 url(<原节点>)
+        // Missing file → fall back to url(<original node>)
         assert_eq!(
             data_uri(&dir, &[], &[arg("\"missing.png\"")]).as_deref(),
             Some("url(\"missing.png\")")
@@ -528,7 +528,7 @@ mod tests {
 
         let out = svg_gradient(&[arg("to bottom"), arg("red 20%"), arg("blue")]).expect("pos");
         assert!(out.contains("offset%3D%2220%25%22"));
-        // 中间色标缺位置 → less 抛错，这里保持原调用
+        // Middle stop without a position → less throws; the original call is kept here
         assert!(svg_gradient(&[arg("to bottom"), arg("red"), arg("blue"), arg("green")]).is_none());
     }
 

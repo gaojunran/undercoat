@@ -1,8 +1,9 @@
-//! S3 特性 golden 对拍：`@function` / `@return` / `@each` / `@for` / `@while`
-//! 以及纯 CSS 函数透传（`rgb(var(--x))`、`min()`/`max()`）。
+//! S3 golden comparison: `@function` / `@return` / `@each` / `@for` / `@while` plus pure
+//! CSS function pass-through (`rgb(var(--x))`, `min()`/`max()`).
 //!
-//! 每个目录是一份独立用例：`main.scss` 是入口，`main.css` 是 dart-sass 1.35.2 的
-//! expanded 产物，逐字节断言。报错用例在 `fixtures-scss-s3-errors/`，断言文案与行列。
+//! Each directory is one independent case: `main.scss` is the entry and `main.css` is the
+//! dart-sass 1.35.2 expanded output, asserted byte for byte. Error cases live in
+//! `fixtures-scss-s3-errors/`, asserting the message together with line and column.
 
 use std::path::Path;
 use std::process::Command;
@@ -32,17 +33,17 @@ fn scss_s3_fixtures_match_dart_sass_byte_for_byte() {
         let path = case.join("main.scss");
         let expected_path = case.join("main.css");
         let expected = std::fs::read_to_string(&expected_path)
-            .unwrap_or_else(|e| panic!("缺少期望产物 {}: {e}", expected_path.display()));
+            .unwrap_or_else(|e| panic!("missing expected output {}: {e}", expected_path.display()));
         let out = compile(&path).unwrap_or_else(|e| panic!("{}: {e:#}", path.display()));
         assert_eq!(
             out.css,
             expected,
-            "产物与 dart-sass 1.35.2 不一致: {}",
+            "output does not match dart-sass 1.35.2: {}",
             path.display()
         );
         checked += 1;
     }
-    assert!(checked >= 12, "S3 fixtures 数量异常: {checked}");
+    assert!(checked >= 12, "unexpected number of S3 fixtures: {checked}");
 }
 
 #[test]
@@ -58,7 +59,11 @@ fn scss_s3_error_fixtures_match_dart_sass() {
         let raw = std::fs::read_to_string(case.join("main.err")).expect("read main.err");
         let expected: serde_json::Value = serde_json::from_str(&raw).expect("parse main.err");
         let err = match compile(&path) {
-            Ok(out) => panic!("{} 应当报错，实际产出:\n{}", path.display(), out.css),
+            Ok(out) => panic!(
+                "{} should have failed, but produced:\n{}",
+                path.display(),
+                out.css
+            ),
             Err(e) => e,
         };
         assert_eq!(
@@ -70,22 +75,25 @@ fn scss_s3_error_fixtures_match_dart_sass() {
         assert_eq!(
             err.line,
             Some(expected["line"].as_u64().expect("line") as u32),
-            "{} 行号",
+            "{} line",
             path.display()
         );
         assert_eq!(
             err.column,
             Some(expected["column"].as_u64().expect("column") as u32),
-            "{} 列号",
+            "{} column",
             path.display()
         );
         checked += 1;
     }
-    assert!(checked >= 9, "S3 报错 fixtures 数量异常: {checked}");
+    assert!(
+        checked >= 9,
+        "unexpected number of S3 error fixtures: {checked}"
+    );
 }
 
-/// `@debug` / `@warn` 走 stderr，形态与 dart 一致（`@debug` 用 inspect，
-/// 顶层带引号字符串去掉引号，`@warn` 用 CSS 形态）。
+/// `@debug` / `@warn` go to stderr in the same form as dart (`@debug` uses inspect,
+/// stripping quotes from a top-level quoted string; `@warn` uses the CSS form).
 #[test]
 fn scss_s3_debug_warn_use_dart_message_form() {
     let path = fixture_root("fixtures-scss-s3").join("debug-warn/main.scss");
@@ -93,7 +101,11 @@ fn scss_s3_debug_warn_use_dart_message_form() {
         .arg(&path)
         .output()
         .expect("run undercoat");
-    assert!(out.status.success(), "编译应当成功: {:?}", out.status);
+    assert!(
+        out.status.success(),
+        "compilation should succeed: {:?}",
+        out.status
+    );
     let stderr = String::from_utf8_lossy(&out.stderr);
     for expected in [
         "DEBUG: 1, 2",
@@ -106,12 +118,12 @@ fn scss_s3_debug_warn_use_dart_message_form() {
     ] {
         assert!(
             stderr.contains(expected),
-            "stderr 缺少 {expected:?}:\n{stderr}"
+            "stderr is missing {expected:?}:\n{stderr}"
         );
     }
 }
 
-/// 递归函数必须有明确上限，不能把栈打爆。
+/// A recursive function must have an explicit limit and must not blow the stack.
 #[test]
 fn scss_s3_function_recursion_limit_is_explicit() {
     let dir = std::env::temp_dir().join("minibuild-scss-s3-recursion");
@@ -122,7 +134,7 @@ fn scss_s3_function_recursion_limit_is_explicit() {
         "@function loop($n) {\n  @return loop($n + 1);\n}\n\n.a {\n  v: loop(1);\n}\n",
     )
     .expect("write");
-    let err = compile(&path).expect_err("应当报错");
+    let err = compile(&path).expect_err("should fail");
     assert!(
         err.message.contains("Function nesting depth exceeded"),
         "{}",

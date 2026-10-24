@@ -1,19 +1,23 @@
-//! 选择器解析与规范化：父选择器展开、`&` 替换、伪类参数、`nth`/`an+b` 归一化。
+//! Selector parsing and normalization: parent selector expansion, `&`
+//! substitution, pseudo-class arguments, `nth`/`an+b` normalization.
 //!
-//! 由 `scss/mod.rs` 拆分而来（纯搬运）。
+//! Split out of `scss/mod.rs` (pure code move).
 
 use super::*;
 
 impl<'a> Converter<'a> {
-    /// 声明值里 `SassNestingDeclaration`（`font: { ... }`）的位置。
+    /// Position of `SassNestingDeclaration` (`font: { ... }`) inside a declaration
+    /// value.
     pub(super) fn nesting_cut(&self, decl: &Declaration<'a>) -> Option<usize> {
         decl.value
             .iter()
             .position(|c| matches!(c, ComponentValue::SassNestingDeclaration(_)))
     }
 
-    /// 选择器列表：插值 → 规范化 → 按逗号拆开 → 相对父选择器解析。
-    /// `X > { ... }` 的尾随组合符：oxc 的选择器 span 不含它，得看原文。
+    /// Selector list: interpolation -> normalization -> split on commas -> resolve
+    /// against the parent selector.
+    /// Trailing combinator of `X > { ... }`: oxc's selector span does not include it,
+    /// so it has to be read from the source.
     fn trailing_combinator(&self, from: usize) -> Option<&'static str> {
         let rest = self.src().get(from..)?;
         let trimmed = rest.trim_start();
@@ -65,7 +69,8 @@ impl<'a> Converter<'a> {
                 }
                 parts.push((piece, newline));
             }
-            // `X > { ... }`：尾随组合符在 oxc 里不在选择器 span 内，从原文补上。
+            // `X > { ... }`: the trailing combinator is not inside the selector span in
+            // oxc, so append it from the source.
             if let Some(combinator) = self.trailing_combinator(selector.span.end) {
                 if let Some((text, _)) = parts.last_mut() {
                     text.push(' ');
@@ -77,7 +82,8 @@ impl<'a> Converter<'a> {
 
         match parent {
             None => {
-                // 裸 `@at-root` 内部：没有外层嵌套，但 `&` 仍指原来的选择器。
+                // Inside a bare `@at-root`: there is no outer nesting, but `&` still
+                // refers to the original selector.
                 let outer = self.eval.parent_selector_text();
                 let mut resolved = Vec::with_capacity(parts.len());
                 for (part, line_break) in parts {
@@ -100,19 +106,24 @@ impl<'a> Converter<'a> {
             }
             Some(ps) => {
                 let parents = &ps.parts;
-                // dart-sass `resolveParentSelectors`：`flattenVertically` 合并各子选择器
-                // 的展开结果（按序号交叉取值），每条产物带自己的 `lineBreak`——
-                // 含 `&` 的取父选择器的，纯后代拼接的取子选择器自己的。
+                // dart-sass `resolveParentSelectors`: `flattenVertically` merges the
+                // expansion results of the child selectors (interleaved by index), and
+                // each result carries its own `lineBreak` -- ones containing `&` take the
+                // parent's, pure descendant concatenations take the child's own.
                 let lists: Vec<Vec<Sel>> = parts
                     .into_iter()
                     .map(|(part, line_break)| resolve_selector(&part, parents, line_break))
                     .collect();
                 let resolved = flatten_vertically(lists);
-                // 兜底：产物里绝不允许残留未替换的 `&`（那会直接变成无效 CSS）。
+                // Safety net: a leftover unreplaced `&` in the result is never allowed
+                // (it would become invalid CSS outright).
                 if let Some(bad) = resolved.iter().find(|sel| has_parent_selector(&sel.text)) {
                     return Err(self.err(
                         list.span.start,
-                        format!("SCSS 内部错误：选择器里残留未替换的 `&`（{}）", bad.text),
+                        format!(
+                            "internal SCSS error: unreplaced `&` left in selector ({})",
+                            bad.text
+                        ),
                     ));
                 }
                 Ok((SelectorSet { parts: resolved }, list.span))
@@ -128,7 +139,8 @@ impl<'a> Converter<'a> {
         let mut prev_end: Option<usize> = None;
         for selector in &block.selectors {
             let span = self.keyframe_span(selector);
-            // 关键帧选择器列表固定用 `, ` 连接（dart 的 `_commaSeparator`）。
+            // Keyframe selector lists are always joined with `, ` (dart's
+            // `_commaSeparator`).
             if prev_end.is_some() {
                 out.push_str(", ");
             }
@@ -155,19 +167,24 @@ pub(super) fn is_space_or_newline(ch: char) -> bool {
     matches!(ch, ' ' | '\t' | '\n' | '\r' | '\x0c')
 }
 
-/// 选择器是否含父选择器 `&`（忽略字符串/属性值里的 `&`）。
-/// 选择器里是否有 `&`（含函数式伪类参数里的：`:not(&)`）。
+/// Whether the selector contains the parent selector `&` (ignoring `&` inside
+/// strings/attribute values).
+/// Whether the selector has a `&` (including inside functional pseudo-class
+/// arguments: `:not(&)`).
 fn has_parent_selector(text: &str) -> bool {
     find_parent_in(text, true).is_some()
 }
 
-/// 顶层（不在括号里）是否有 `&`：只用于「笛卡尔积」展开。
+/// Whether there is a `&` at the top level (not inside parentheses): only used for
+/// the "cartesian product" expansion.
 fn find_parent(text: &str) -> Option<(usize, usize)> {
     find_parent_in(text, false)
 }
 
-/// 第一个 `&` 的位置与紧随的后缀长度（`&-s` 的 `-s`）。
-/// `deep == false` 时跳过括号内（那些是伪类参数里的 `&`，另走列表替换）。
+/// Position of the first `&` and the length of the suffix right after it (the `-s`
+/// of `&-s`).
+/// With `deep == false` parentheses are skipped (those `&` belong to pseudo-class
+/// arguments and are substituted separately per list).
 fn find_parent_in(text: &str, deep: bool) -> Option<(usize, usize)> {
     let bytes = text.as_bytes();
     let mut depth = 0usize;
@@ -206,11 +223,13 @@ fn find_parent_in(text: &str, deep: bool) -> Option<(usize, usize)> {
     None
 }
 
-/// 子选择器相对父选择器解析。
+/// Resolve a child selector against the parent selectors.
 ///
-/// 跨行位（dart `ComplexSelector.lineBreak`）实测规则：
-/// - 纯后代拼接：`父子任一跨行` 即换行；
-/// - 含 `&`：只继承父选择器的跨行（`&.b,\n&.c` 输出在一行）。
+/// Observed rules for line breaks (dart `ComplexSelector.lineBreak`):
+/// - pure descendant concatenation: a break as soon as `either parent or child
+///   breaks`;
+/// - containing `&`: only inherit the parent's break (`&.b,\n&.c` is output on one
+///   line).
 pub(super) fn resolve_selector(child: &str, parents: &[Sel], line_break: bool) -> Vec<Sel> {
     if !has_parent_selector(child) {
         return parents
@@ -221,7 +240,9 @@ pub(super) fn resolve_selector(child: &str, parents: &[Sel], line_break: bool) -
             })
             .collect();
     }
-    // 函数式伪类参数里的 `&` 用**整份父列表**代入（`:not(.a, .b)`），其余位置才做笛卡尔积。
+    // A `&` inside functional pseudo-class arguments is substituted with the **whole
+    // parent list** (`:not(.a, .b)`); only the remaining positions use the cartesian
+    // product.
     let expanded = expand_pseudo_args(child, parents);
     if !has_parent_selector(&expanded) {
         return vec![Sel {
@@ -239,8 +260,10 @@ pub(super) fn resolve_selector(child: &str, parents: &[Sel], line_break: bool) -
         .collect()
 }
 
-/// 把 `&`（含 `&-suffix`）逐个替换成父选择器（`& + &` 展开成笛卡尔积）。
-/// 结果附带「首个 `&` 用的是哪个父选择器」的下标（跨行位取自它）。
+/// Substitute each `&` (including `&-suffix`) with a parent selector (`& + &`
+/// expands into a cartesian product).
+/// The result carries the index of "which parent the first `&` used" (the line break
+/// is taken from it).
 fn expand_parent(child: &str, parents: &[&str]) -> Vec<(usize, String)> {
     let Some((at, suffix_len)) = find_parent(child) else {
         return vec![(0, child.to_string())];
@@ -257,12 +280,14 @@ fn expand_parent(child: &str, parents: &[&str]) -> Vec<(usize, String)> {
     out
 }
 
-/// 伪类参数里的 `&`：dart 的 `SelectorList.resolveParentSelectors` 语义——
-/// 参数按选择器列表拆开，每个复杂选择器里的多个 `&` 做笛卡尔积，
-/// 最后 `flattenVertically`（按下标交叉）合并；`&` 只替换成单个父选择器。
+/// `&` inside pseudo-class arguments: the semantics of dart's
+/// `SelectorList.resolveParentSelectors` -- the argument is split as a selector
+/// list, multiple `&` in each complex selector form a cartesian product, and
+/// finally `flattenVertically` (interleaved by index) merges them; each `&` is
+/// substituted with a single parent selector.
 fn expand_pseudo_args(text: &str, parents: &[Sel]) -> String {
     let mut out = text.to_string();
-    // 从最内层往外套（`:not(:is(&))` 先解 `:is`）。
+    // Substitute from the innermost outwards (`:not(:is(&))` resolves `:is` first).
     loop {
         let Some((open, name)) = innermost_pseudo_arg_with_parent(&out) else {
             return out;
@@ -276,7 +301,8 @@ fn expand_pseudo_args(text: &str, parents: &[Sel]) -> String {
     }
 }
 
-/// 最内层「参数里有 `&`」的函数式伪类：返回 `(` 的下标与伪类名。
+/// Innermost functional pseudo-class whose argument contains `&`: returns the index
+/// of `(` and the pseudo-class name.
 fn innermost_pseudo_arg_with_parent(text: &str) -> Option<(usize, String)> {
     let bytes = text.as_bytes();
     let mut quote: Option<u8> = None;
@@ -313,7 +339,8 @@ fn innermost_pseudo_arg_with_parent(text: &str) -> Option<(usize, String)> {
     found
 }
 
-/// `(` 前面是否是 `:name`（函数式伪类），返回伪类名。
+/// Whether `(` is preceded by `:name` (a functional pseudo-class); returns the
+/// pseudo-class name.
 fn pseudo_name_before(text: &str, open: usize) -> Option<String> {
     let bytes = text.as_bytes();
     let mut i = open;
@@ -335,7 +362,8 @@ fn paren_close(text: &str, open: usize) -> Option<usize> {
     crate::text::matching(text, open).map(|end| end - 1)
 }
 
-/// `:nth-child(2n of &)`：`of` 之后才是选择器列表，前缀只打印一次。
+/// `:nth-child(2n of &)`: the selector list only starts after `of`, and the prefix
+/// is printed once.
 fn resolve_pseudo_arg(name: &str, arg: &str, parents: &[Sel]) -> String {
     let lower = name.to_ascii_lowercase();
     if lower == "nth-child" || lower == "nth-last-child" {
@@ -348,7 +376,7 @@ fn resolve_pseudo_arg(name: &str, arg: &str, parents: &[Sel]) -> String {
     join_selector_list(&resolve_selector_text(arg, parents))
 }
 
-/// 顶层 ` of `（两侧带空白）的位置。
+/// Position of a top-level ` of ` (whitespace on both sides).
 fn top_level_of(text: &str) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut depth = 0usize;
@@ -387,7 +415,8 @@ fn top_level_of(text: &str) -> Option<usize> {
     None
 }
 
-/// 把一段选择器文本（伪类参数）解析成选择器列表，`&` 逐父展开。
+/// Parse a piece of selector text (a pseudo-class argument) into a selector list,
+/// expanding `&` for each parent.
 fn resolve_selector_text(text: &str, parents: &[Sel]) -> Vec<Sel> {
     let texts = parents.iter().map(|p| p.text.as_str()).collect::<Vec<_>>();
     let lists: Vec<Vec<Sel>> = split_top_level_commas(text)
@@ -406,7 +435,8 @@ fn resolve_selector_text(text: &str, parents: &[Sel]) -> Vec<Sel> {
     flatten_vertically(lists)
 }
 
-/// 多个 `&` 的笛卡尔积；返回值附带「首个 `&` 用了哪个父选择器」。
+/// Cartesian product of multiple `&`; the result carries "which parent the first `&`
+/// used".
 fn expand_cartesian(child: &str, parents: &[&str]) -> Vec<(Option<usize>, String)> {
     let Some((at, suffix_len)) = find_parent_in(child, true) else {
         return vec![(None, child.to_string())];
@@ -423,7 +453,7 @@ fn expand_cartesian(child: &str, parents: &[&str]) -> Vec<(Option<usize>, String
     out
 }
 
-/// dart 的 `flattenVertically`：按下标交叉合并多份列表。
+/// dart's `flattenVertically`: merge several lists interleaved by index.
 fn flatten_vertically(lists: Vec<Vec<Sel>>) -> Vec<Sel> {
     let longest = lists.iter().map(Vec::len).max().unwrap_or(0);
     let mut out = Vec::new();
@@ -440,7 +470,8 @@ fn flatten_vertically(lists: Vec<Vec<Sel>>) -> Vec<Sel> {
     out
 }
 
-/// 选择器列表按 dart 的换行位打印（用于伪类参数内部）。
+/// Print a selector list with dart's line-break positions (used inside pseudo-class
+/// arguments).
 fn join_selector_list(list: &[Sel]) -> String {
     let mut out = String::new();
     for (i, sel) in list.iter().enumerate() {
@@ -464,7 +495,8 @@ pub(super) fn split_top_level_commas(text: &str) -> Vec<&str> {
         .collect()
 }
 
-/// 块内是否含规则类语句（决定 at-rule 体按规则还是声明列表处理）。
+/// Whether the block contains rule-like statements (decides whether an at-rule body
+/// is processed as rules or as a declaration list).
 pub(super) fn has_rule_statements(stmts: &[Statement<'_>]) -> bool {
     stmts.iter().any(|st| {
         !matches!(
@@ -478,22 +510,23 @@ pub(super) fn snippet(src: &str, start: usize, end: usize) -> String {
     src.get(start..end).unwrap_or("").to_string()
 }
 
-/// 声明类 at-rule 所处的静态容器。dart 在 **解析期** 就按容器拒绝某些声明（实测：
-/// `@if false` 分支里的 `@mixin` 也报错），所以这里是独立于求值的静态遍历。
+/// Static container of a declaration-like at-rule. dart rejects some declarations by
+/// container already at **parse time** (observed: a `@mixin` inside an `@if false`
+/// branch errors too), so this is a static walk independent of evaluation.
 #[derive(Clone, Copy, Default)]
 pub(super) struct Nesting {
-    /// mixin 体（dart `_inMixin`）。
+    /// mixin body (dart `_inMixin`).
     pub(super) mixin: bool,
-    /// `@include ... { }` 的 content 块（dart `_inContentBlock`）。
+    /// content block of `@include ... { }` (dart `_inContentBlock`).
     pub(super) content_block: bool,
-    /// 控制指令体内：`@if` / `@else` / `@each` / `@for` / `@while`。
+    /// Inside a control directive body: `@if` / `@else` / `@each` / `@for` / `@while`.
     pub(super) control: bool,
-    /// function 体（dart `_inFunction`）：只允许下表的 at-rule。
+    /// function body (dart `_inFunction`): only the at-rules listed below are allowed.
     pub(super) function: bool,
 }
 
 impl Nesting {
-    /// function 体白名单（dart 的 function 子解析器）。
+    /// Whitelist of a function body (dart's function sub-parser).
     pub(super) fn function_allows(name: &str) -> bool {
         matches!(
             name,
@@ -502,7 +535,8 @@ impl Nesting {
     }
 }
 
-/// 选择器规范化：折叠空白、组合符两侧一个空格、逗号后一个空格、括号内去空白。
+/// Selector normalization: collapse whitespace, one space on both sides of a
+/// combinator, one space after a comma, no whitespace inside parentheses.
 pub(super) fn normalize_selector(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut pending_space = false;
@@ -533,7 +567,8 @@ pub(super) fn normalize_selector(text: &str) -> String {
         }
         match ch {
             '\'' | '"' if brackets > 0 => {
-                // 属性选择器里的字符串：合法标识符去引号，否则按引号规则重写。
+                // A string inside an attribute selector: a legal identifier loses its
+                // quotes, otherwise it is rewritten per the quoting rules.
                 let mut raw = String::new();
                 raw.push(ch);
                 while let Some(c) = chars.next() {
@@ -557,7 +592,8 @@ pub(super) fn normalize_selector(text: &str) -> String {
                 } else {
                     out.push_str(&value::quote_string(&text));
                 }
-                // 引号串是属性值：它后面的空白是后代选择器分隔符，不能被吞掉。
+                // The quoted string is an attribute value: the whitespace after it
+                // separates descendant selectors and must not be swallowed.
                 after_eq = false;
             }
             '\'' | '"' => {
@@ -636,11 +672,13 @@ pub(super) fn normalize_selector(text: &str) -> String {
     normalize_nth(out.trim_end())
 }
 
-/// `:nth-child()` / `:nth-last-child()` 的 An+B 参数重排。
+/// An+B argument reformatting for `:nth-child()` / `:nth-last-child()`.
 ///
-/// dart-sass 1.35.2 只对这两个伪类做结构化 An+B 序列化（去空白、`n`/`odd`/`even`
-/// 小写、保留 A/B 原数字拼写与符号）；`:nth-of-type()` / `:nth-last-of-type()`
-/// 实测**不**归一（空白按普通选择器折叠），所以不在此列。
+/// dart-sass 1.35.2 only serializes An+B structurally for these two pseudo-classes
+/// (whitespace removed, `n`/`odd`/`even` lowercased, the original digit spelling and
+/// sign of A/B kept); `:nth-of-type()` / `:nth-last-of-type()` are observed to be
+/// **not** normalized (whitespace is collapsed like in any other selector), so they
+/// are not included here.
 fn normalize_nth(text: &str) -> String {
     const NAMES: [&str; 2] = ["nth-last-child", "nth-child"];
     let chars: Vec<char> = text.chars().collect();
@@ -702,7 +740,8 @@ fn matching_paren(chars: &[char], open: usize) -> Option<usize> {
     None
 }
 
-/// An+B 的序列化：去掉全部空白、`n`/`odd`/`even` 小写，`of <selector>` 用单空格。
+/// An+B serialization: remove all whitespace, lowercase `n`/`odd`/`even`, and use a
+/// single space in `of <selector>`.
 fn normalize_anb(inner: &str) -> String {
     let (anb, rest) = split_of(inner);
     let anb: String = anb.split_whitespace().collect::<String>().replace('N', "n");
@@ -720,7 +759,7 @@ fn normalize_anb(inner: &str) -> String {
     }
 }
 
-/// 在深度 0 处切出 `of` 子句（`2n+1 of .a`）。
+/// Split out the `of` clause at depth 0 (`2n+1 of .a`).
 fn split_of(inner: &str) -> (&str, Option<&str>) {
     let bytes = inner.as_bytes();
     let mut depth = 0usize;

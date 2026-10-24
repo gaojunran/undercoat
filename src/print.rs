@@ -1,14 +1,19 @@
-//! 带源映射的 CSS 打印器。
+//! A CSS printer with source mapping.
 //!
-//! 打印器是 sourcemap 的唯一出口：每个从源里来的 token 都必须走 [`Printer::token`]，
-//! 生成的分隔符（缩进、换行、逗号）走 [`Printer::raw`]。这样「能不能反查原始位置」
-//! 由打印时是否带 span 决定，而不是事后修补。
+//! The printer is the sole exit point for sourcemaps: every token that originates in the
+//! source must go through [`Printer::token`], while generated separators (indentation,
+//! newlines, commas) go through [`Printer::raw`]. This way "can the original location be
+//! looked up" is decided by whether a span is attached at print time, not by patching things
+//! up afterwards.
 //!
-//! 多文件（@import 内联）通过 [`Printer::add_file`] 登记、[`Printer::set_segments`]
-//! 给出「合并串 → 各文件」的段表：token 的 span 先从合并串坐标二分回
-//! `(file, 原始偏移)`，再按该文件的行表换算。打印器不持有外部字符串的借用。
+//! Multiple files (`@import` inlining) are registered via [`Printer::add_file`], and
+//! [`Printer::set_segments`] supplies the "merged text → each file" segment table: a token's
+//! span is first binary-searched from merged-text coordinates back to `(file, original
+//! offset)`, then converted using that file's line table. The printer holds no borrows of
+//! external strings.
 //!
-//! 打印器只追加、不回改：extend 之类的收尾改写发生在 IR 上（`doc`），不在这里动已写出的文本。
+//! The printer is append-only and never rewrites: finishing passes such as extend happen on
+//! the IR (`doc`), not on text that has already been written here.
 
 use oxc_css_parser::pos::Span;
 
@@ -18,14 +23,17 @@ use crate::{LineIndex, Options};
 struct SourceFile {
     src: String,
     index: LineIndex,
-    /// 磁盘原文（`sourcesContent`）；单文件场景保持 `None`，不改变既有 map 字节。
+    /// The on-disk original (`sourcesContent`); kept `None` in the single-file case so the
+    /// existing map bytes stay unchanged.
     content: Option<String>,
 }
 
-/// 合并串的一段：`[start, end)` 来自 `file` 的 `orig_start` 起。
+/// One segment of the merged text: `[start, end)` starts at `orig_start` in `file`.
 ///
-/// `@import` 文本内联后，打印器收到的 span 全是合并串坐标，收尾时先经这张表
-/// 二分回 `(file, 原始偏移)`，再按该文件的行表换算行列。
+/// After `@import` text inlining, every span the printer receives is in merged-text
+/// coordinates; during the finishing pass they go through this table to be binary-searched
+/// back to `(file, original offset)`, then converted to line/column via that file's line
+/// table.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SourceSegment {
     pub(crate) start: usize,
@@ -34,7 +42,8 @@ pub(crate) struct SourceSegment {
     pub(crate) orig_start: usize,
 }
 
-/// 一次源 token 写入：先记输出偏移，收尾时换算成行列。
+/// One source-token write: records the output offset now and converts it to line/column
+/// during the finishing pass.
 struct Pending {
     offset: usize,
     file: u32,
@@ -68,7 +77,7 @@ impl Printer {
         }
     }
 
-    /// 登记一个附加源文件（@import 内联），返回 file id。
+    /// Register an additional source file (`@import` inlining) and return its file id.
     pub(crate) fn add_file(&mut self, file: &str, src: &str) -> u32 {
         if let Some(i) = self.sources.iter().position(|s| s == file) {
             return i as u32;
@@ -82,30 +91,31 @@ impl Printer {
         (self.sources.len() - 1) as u32
     }
 
-    /// 登记某文件的磁盘原文（多文件 map 的 `sourcesContent`）。
+    /// Record a file's on-disk original (the `sourcesContent` of a multi-file map).
     pub(crate) fn set_content(&mut self, file: u32, content: &str) {
         if let Some(f) = self.files.get_mut(file as usize) {
             f.content = Some(content.to_string());
         }
     }
 
-    /// 合并串 → 源文件的段表（升序、互不重叠、覆盖整个合并串）。
+    /// The merged text → source file segment table (ascending, non-overlapping, covering the
+    /// whole merged text).
     pub(crate) fn set_segments(&mut self, segments: Vec<SourceSegment>) {
         self.segments = segments;
     }
 
-    /// 纯生成文本（缩进、分隔符、换行），不产生映射。
+    /// Purely generated text (indentation, separators, newlines); produces no mapping.
     pub(crate) fn raw(&mut self, s: &str) {
         self.out.push_str(s);
     }
 
-    /// 源 token（使用当前文件）：推进输出并记录一条映射。
+    /// A source token (using the current file): advances the output and records one mapping.
     pub(crate) fn token(&mut self, s: &str, span: Span) {
         let file = self.current;
         self.token_in(file, s, span);
     }
 
-    /// 指定文件的源 token。
+    /// A source token attributed to the given file.
     pub(crate) fn token_in(&mut self, file: u32, s: &str, span: Span) {
         if self.want_map && !s.is_empty() && self.files.get(file as usize).is_some() {
             self.pending.push(Pending {
@@ -127,7 +137,7 @@ impl Printer {
         }
     }
 
-    /// 收尾：返回 (css, map)。
+    /// Finishing pass: returns (css, map).
     pub(crate) fn finish(mut self, opts: &Options) -> (String, Option<String>) {
         let out = std::mem::take(&mut self.out);
         if !opts.source_map || self.pending.is_empty() {
@@ -155,7 +165,8 @@ impl Printer {
             };
             let (line, col) = file.index.line_col(src_offset, &file.src);
             let (gen_line, gen_col) = line_col(&line_starts, offset);
-            // 行首（col 0）补一条映射：IDE 按整行/行首查询时也能反查
+            // Add a mapping at the start of the line (col 0) so that IDEs querying by whole
+            // line / line start can still look it up
             if mapped_line != Some(gen_line) {
                 if gen_col > 0 {
                     map.add(Mapping {
@@ -181,7 +192,8 @@ impl Printer {
         (out, Some(json))
     }
 
-    /// 合并串偏移 → `(文件, 原始偏移)`；无段表（单文件）时返回 `None`，沿用旧路径。
+    /// Merged offset → `(file, original offset)`; returns `None` without a segment table
+    /// (single file), keeping the old path.
     fn locate(&self, merged: usize) -> Option<(u32, usize)> {
         let i = self.segments.partition_point(|s| s.start <= merged);
         let segment = self.segments.get(i.checked_sub(1)?)?;
@@ -206,7 +218,8 @@ fn line_col(starts: &[usize], offset: usize) -> (u32, u32) {
     (line as u32, col as u32)
 }
 
-/// `sources` 重写：命中 projectRoot 前缀则改成项目相对（WDT `path.posix.relative` 语义）。
+/// `sources` rewriting: when the projectRoot prefix matches, make it project-relative (WDT
+/// `path.posix.relative` semantics).
 fn rewrite_source(source: &str, project_root: Option<&str>) -> String {
     let Some(root) = project_root else {
         return source.to_string();

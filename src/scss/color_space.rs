@@ -1,21 +1,25 @@
-//! 现代颜色空间（`color.space()` / `color.to-space()` / `lab()` / `oklch()` … 的底座）。
+//! Modern color spaces (the foundation for `color.space()` / `color.to-space()` /
+//! `lab()` / `oklch()` …).
 //!
-//! 只有本文件负责空间数学：所有函数接收/返回**归一化通道**（`[f64; 3]`），
-//! 参考白点与矩阵按 CSS Color 4 的定义（`lab`/`lch` 是 D50，`oklab`/`oklch` 与
-//! `xyz` 是 D65）。序列化与 Sass 侧的单位换算在 `value.rs` / `modules.rs`。
+//! Only this file owns the space math: every function takes and returns
+//! **normalized channels** (`[f64; 3]`), with reference white points and matrices as
+//! defined by CSS Color 4 (`lab`/`lch` are D50, `oklab`/`oklch` and `xyz` are D65).
+//! Serialization and the Sass-side unit conversion live in `value.rs` / `modules.rs`.
 //!
-//! 矩阵常数照 CSS Color 4 原样抄（不手改末位），关掉与之相关的 lint。
+//! Matrix constants are copied verbatim from CSS Color 4 (trailing digits are not
+//! hand-tweaked), and the lints related to them are disabled.
 
 #![allow(clippy::excessive_precision)]
 
-/// CSS Color 4 的颜色空间。
+/// Color spaces of CSS Color 4.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Space {
-    /// legacy：`rgb()` / 十六进制，通道 0..255（对外）——内部仍按 0..1 归一。
+    /// legacy: `rgb()` / hexadecimal, channels 0..255 (outward) -- internally still
+    /// normalized to 0..1.
     Rgb,
-    /// legacy：`hsl()`。
+    /// legacy: `hsl()`.
     Hsl,
-    /// legacy：`hwb()`。
+    /// legacy: `hwb()`.
     Hwb,
     Srgb,
     SrgbLinear,
@@ -53,7 +57,7 @@ impl Space {
         })
     }
 
-    /// `color.space()` 的返回值（`xyz-d65` 归一成 `xyz`）。
+    /// The value returned by `color.space()` (`xyz-d65` normalized to `xyz`).
     pub(crate) fn name(self) -> &'static str {
         match self {
             Self::Rgb => "rgb",
@@ -74,12 +78,12 @@ impl Space {
         }
     }
 
-    /// legacy 空间只有 `rgb` / `hsl` / `hwb`（dart 的 `isLegacy`）。
+    /// Only `rgb` / `hsl` / `hwb` are legacy spaces (dart's `isLegacy`).
     pub(crate) fn is_legacy(self) -> bool {
         matches!(self, Self::Rgb | Self::Hsl | Self::Hwb)
     }
 
-    /// 该空间的通道名（不含 `alpha`），顺序即序列化顺序。
+    /// Channel names of this space (excluding `alpha`), in serialization order.
     pub(crate) fn channel_names(self) -> [&'static str; 3] {
         match self {
             Self::Rgb
@@ -97,7 +101,8 @@ impl Space {
         }
     }
 
-    /// 通道名 → 序号；支持 dart 的简写（`red`/`r`、`green`/`g`、`blue`/`b` …）。
+    /// Channel name -> index; supports dart's shorthands (`red`/`r`, `green`/`g`,
+    /// `blue`/`b` …).
     pub(crate) fn channel_index(self, name: &str) -> Option<usize> {
         let lower = name.to_ascii_lowercase();
         let names = self.channel_names();
@@ -123,7 +128,8 @@ impl Space {
             .position(|list| list.contains(&lower.as_str()))
     }
 
-    /// 通道是否需要 `%` 单位（`lab` 的 lightness、`hsl` 的 saturation…）。
+    /// Whether the channel takes a `%` unit (lightness of `lab`, saturation of
+    /// `hsl`…).
     pub(crate) fn channel_unit(self, index: usize) -> Option<&'static str> {
         match (self, index) {
             (Self::Hsl | Self::Hwb, 0) => Some("deg"),
@@ -135,7 +141,8 @@ impl Space {
         }
     }
 
-    /// 通道的合法区间（用于 `is-in-gamut` 与 `clip`）；`None` = 无界。
+    /// Legal range of the channel (used by `is-in-gamut` and `clip`); `None` =
+    /// unbounded.
     pub(crate) fn channel_bounds(self, index: usize) -> Option<(f64, f64)> {
         match self {
             Self::Rgb => Some((0.0, 255.0)),
@@ -180,7 +187,7 @@ impl Space {
 }
 
 // ---------------------------------------------------------------------------
-// 基础数学
+// Basic math
 // ---------------------------------------------------------------------------
 
 fn mul(m: &[[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
@@ -191,7 +198,7 @@ fn mul(m: &[[f64; 3]; 3], v: [f64; 3]) -> [f64; 3] {
     ]
 }
 
-/// sRGB 传递函数（IEC 61966-2-1）。
+/// sRGB transfer function (IEC 61966-2-1).
 fn srgb_to_linear(c: f64) -> f64 {
     let abs = c.abs();
     if abs <= 0.04045 {
@@ -302,7 +309,7 @@ const XYZ65_TO_REC2020: [[f64; 3]; 3] = [
     ],
 ];
 
-/// Bradford 色适应（D65 ↔ D50）。
+/// Bradford chromatic adaptation (D65 <-> D50).
 const BRADFORD: [[f64; 3]; 3] = [
     [
         1.0479297925449969,
@@ -520,7 +527,7 @@ pub(crate) fn hsl_to_srgb(hsl: [f64; 3]) -> [f64; 3] {
     [channel(h + 1.0 / 3.0), channel(h), channel(h - 1.0 / 3.0)]
 }
 
-/// sRGB → HSL（`h` 度，`s`/`l` 0..1）。
+/// sRGB -> HSL (`h` in degrees, `s`/`l` 0..1).
 pub(crate) fn srgb_to_hsl(rgb: [f64; 3]) -> [f64; 3] {
     let (r, g, b) = (rgb[0], rgb[1], rgb[2]);
     let max = r.max(g).max(b);
@@ -545,7 +552,7 @@ pub(crate) fn srgb_to_hsl(rgb: [f64; 3]) -> [f64; 3] {
     [h, s, l]
 }
 
-/// sRGB → HWB（`w`/`b` 0..1）。
+/// sRGB -> HWB (`w`/`b` 0..1).
 pub(crate) fn srgb_to_hwb(rgb: [f64; 3]) -> [f64; 3] {
     let (r, g, b) = (rgb[0], rgb[1], rgb[2]);
     let white = r.min(g).min(b);
@@ -554,7 +561,7 @@ pub(crate) fn srgb_to_hwb(rgb: [f64; 3]) -> [f64; 3] {
     [hue, white, black]
 }
 
-/// HWB → sRGB（`w`/`b` 百分比；`w + b > 100` 时按 CSS 规则归一）。
+/// HWB -> sRGB (`w`/`b` percentages; normalized per CSS when `w + b > 100`).
 pub(crate) fn hwb_to_srgb(hwb: [f64; 3]) -> [f64; 3] {
     let (mut white, mut black) = (hwb[1] / 100.0, hwb[2] / 100.0);
     if white + black > 1.0 {
@@ -572,10 +579,10 @@ pub(crate) fn hwb_to_srgb(hwb: [f64; 3]) -> [f64; 3] {
 }
 
 // ---------------------------------------------------------------------------
-// 对外：空间转换
+// Exposed: space conversion
 // ---------------------------------------------------------------------------
 
-/// 任意空间 → 归一化 sRGB（0..1，可能越界）。
+/// Any space -> normalized sRGB (0..1, may be out of gamut).
 pub(crate) fn to_srgb(space: Space, ch: [f64; 3]) -> [f64; 3] {
     match space {
         Space::Rgb | Space::Srgb => ch,
@@ -620,7 +627,7 @@ pub(crate) fn to_srgb(space: Space, ch: [f64; 3]) -> [f64; 3] {
     }
 }
 
-/// 归一化 sRGB → 任意空间（`ch` 的约定见 `Space`）。
+/// Normalized sRGB -> any space (the `ch` convention is described on `Space`).
 pub(crate) fn from_srgb(space: Space, rgb: [f64; 3]) -> [f64; 3] {
     match space {
         Space::Rgb | Space::Srgb => rgb,
@@ -674,7 +681,8 @@ pub(crate) fn from_srgb(space: Space, rgb: [f64; 3]) -> [f64; 3] {
     }
 }
 
-/// 空间之间的直接换算（同值域约定：`ch` 已是该空间的通道值）。
+/// Direct conversion between spaces (same value-domain convention: `ch` already
+/// holds channel values of that space).
 pub(crate) fn convert(from: Space, to: Space, ch: [f64; 3]) -> [f64; 3] {
     if from == to {
         return ch;
@@ -682,27 +690,29 @@ pub(crate) fn convert(from: Space, to: Space, ch: [f64; 3]) -> [f64; 3] {
     from_srgb(to, to_srgb(from, ch))
 }
 
-/// 两个空间是否"同时有界"到 sRGB：越界判定用归一化 sRGB 的 0..1 区间。
+/// Whether both spaces are "bounded at the same time" to sRGB: out-of-gamut is
+/// decided by the 0..1 range of normalized sRGB.
 pub(crate) fn in_srgb_gamut(rgb: [f64; 3]) -> bool {
     const EPSILON: f64 = 1e-9;
     rgb.iter().all(|c| *c >= -EPSILON && *c <= 1.0 + EPSILON)
 }
 
-/// `to-gamut(..., $method: clip)`：在 sRGB 里夹住，再回到原空间。
+/// `to-gamut(..., $method: clip)`: clamp within sRGB, then return to the original
+/// space.
 pub(crate) fn clip_to_gamut(space: Space, ch: [f64; 3]) -> [f64; 3] {
     let srgb = to_srgb(space, ch);
     let clipped = srgb.map(|c| c.clamp(0.0, 1.0));
     from_srgb(space, clipped)
 }
 
-/// OKLab 色差（CSS Color 4 的 deltaE-OK）。
+/// OKLab color difference (deltaE-OK of CSS Color 4).
 pub(crate) fn delta_eok(a: [f64; 3], b: [f64; 3]) -> f64 {
     let d = [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
     (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt()
 }
 
-/// CSS Color 4 的 `local-MINDE` 色域映射：在 OKLCH 里二分降 chroma，
-/// 直到夹过的颜色与原颜色的 deltaE-OK 小于 JND。
+/// `local-MINDE` gamut mapping of CSS Color 4: bisect chroma down in OKLCH until
+/// the deltaE-OK between the clipped and the original color falls below the JND.
 pub(crate) fn local_minde_to_gamut(space: Space, ch: [f64; 3]) -> [f64; 3] {
     const JND: f64 = 0.02;
     const EPSILON: f64 = 0.0001;
@@ -747,7 +757,8 @@ mod tests {
         a.iter().zip(b.iter()).all(|(x, y)| (x - y).abs() <= tol)
     }
 
-    /// 期望值来自 dart-sass 1.93.2（`color.to-space()` 的产物）。
+    /// Expected values come from dart-sass 1.93.2 (the output of
+    /// `color.to-space()`).
     #[test]
     fn conversions_match_modern_dart() {
         // #003366
@@ -757,7 +768,8 @@ mod tests {
             [210.0, 100.0, 20.0],
             1e-9
         ));
-        // 末位差异 (<1e-6) 来自矩阵常数的版本差异，语义无关。
+        // The trailing-digit difference (<1e-6) comes from version differences in
+        // the matrix constants and is semantically irrelevant.
         assert!(close(
             from_srgb(Space::Lab, srgb),
             [20.7457453073, 1.8876487232, -34.9880898979],
@@ -778,7 +790,7 @@ mod tests {
             [0.0690923275, 0.196438359, 0.3861624224],
             2e-6
         ));
-        // lab(50 20 30) → sRGB 0..1
+        // lab(50 20 30) -> sRGB 0..1
         assert!(close(
             to_srgb(Space::Lab, [50.0, 20.0, 30.0]),
             [0.6301122046, 0.4125440309, 0.2688994203],
@@ -801,7 +813,7 @@ mod tests {
         assert!(!in_srgb_gamut(to_srgb(Space::Oklch, oklch)));
         let clipped = clip_to_gamut(Space::Oklch, oklch);
         assert!(in_srgb_gamut(to_srgb(Space::Oklch, clipped)));
-        // dart 1.93.2：`color.to-gamut(oklch(0.7 0.4 30), $method: clip)` ⇒
+        // dart 1.93.2: `color.to-gamut(oklch(0.7 0.4 30), $method: clip)` =>
         // `oklch(62.7955363921% 0.2576833038 29.2338802796deg)`
         assert!(close(
             clipped,

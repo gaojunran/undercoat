@@ -1,7 +1,7 @@
-//! S3.2 golden 对拍：`@forward` 与 `@use ... with`。
+//! S3.2 golden comparison: `@forward` and `@use ... with`.
 //!
-//! 每个目录是一份独立用例：`main.scss` 是入口，`main.css` 是 dart-sass 1.93.2 的
-//! expanded 产物（去掉末尾换行），逐字节断言。
+//! Each directory is one independent case: `main.scss` is the entry and `main.css` is the
+//! dart-sass 1.93.2 expanded output (trailing newline stripped), asserted byte for byte.
 
 use std::path::Path;
 
@@ -24,14 +24,14 @@ fn scss_s32_fixtures_match_dart_sass_byte_for_byte() {
         let path = case.join("main.scss");
         let expected_path = case.join("main.css");
         let expected = std::fs::read_to_string(&expected_path)
-            .unwrap_or_else(|e| panic!("缺少期望产物 {}: {e}", expected_path.display()));
+            .unwrap_or_else(|e| panic!("missing expected output {}: {e}", expected_path.display()));
         let source = std::fs::read_to_string(&path).expect("read scss");
         let out = compile_file(&path, &source, &Options::default())
             .unwrap_or_else(|e| panic!("{}: {e:#}", path.display()));
         assert_eq!(
             out.css,
             expected,
-            "产物与 dart-sass 1.93.2 不一致: {}",
+            "output does not match dart-sass 1.93.2: {}",
             path.display()
         );
         names.push(
@@ -56,8 +56,8 @@ fn scss_s32_fixtures_match_dart_sass_byte_for_byte() {
     ] {
         assert!(
             names.iter().any(|n| n == required),
-            "缺少 fixture {required}: {names:?}"
+            "missing fixture {required}: {names:?}"
         );
     }
-    assert_eq!(checked, 10, "S3.2 fixtures 数量异常: {checked}");
+    assert_eq!(checked, 10, "unexpected number of S3.2 fixtures: {checked}");
 }

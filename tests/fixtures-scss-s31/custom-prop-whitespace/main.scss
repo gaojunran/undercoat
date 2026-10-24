@@ -1,5 +1,5 @@
-// 自定义属性值的空白游程压成「游程的最后一个字符」：tab 结尾就留 tab。
-// 声明本身用 tab 缩进（ColorUI 主题变量块 `_light.scss`/`_dark.scss` 的写法）。
+// whitespace runs in custom property values collapse to "the run's last character": a run ending in a tab keeps the tab.
+// the declaration itself is indented with tabs (as in the ColorUI theme variable blocks `_light.scss`/`_dark.scss`).
 .theme {
 	--a:  	#111;
 	--b: 	  #222;
@@ -12,7 +12,7 @@
 	--trailing-tab: 1  	;
 }
 
-// 空白游程夹在字符串 / 注释 / 插值之间时同样只留最后一个字符。
+// a whitespace run between a string / comment / interpolation also keeps only its last character.
 .mixed {
   --a: a 	'b'  	c;
   --b: a 	#{"b"}  	c;
@@ -20,7 +20,7 @@
   --d: 	"x"  	;
 }
 
-// 多行续行：缩进按「输出缩进 + max(0, 源缩进 − 声明列)」逐字符平移，tab 原样保留。
+// multi-line continuation: indentation is shifted per character by output indent + max(0, source indent − declaration column), and tabs are kept as is.
 .multiline {
   --list: a,
 	b,
@@ -29,7 +29,7 @@
 		x;
 }
 
-// 纯空白值：整段压成游程最后一个字符。
+// a whitespace-only value: the whole run collapses to its last character.
 .blank {
   --only-tab: 	 	;
   --only-space:    ;

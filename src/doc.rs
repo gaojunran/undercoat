@@ -1,8 +1,11 @@
-//! 输出中间表示与打印器：两个方言（scss / less）共用的产物层。
+//! Output intermediate representation and printer: the output layer shared by both
+//! dialects (scss / less).
 //!
-//! 求值阶段产出 [`Item`] 树，[`print`] 按 [`Style`] 描述的形态把它写成 CSS（并同时
-//! 喂 sourcemap）。方言差异只允许落在 [`Style`] 的字段上；语义差异（空规则删除、
-//! 空 `@media` 删除、`@font-face` 保留 `{}`、`//` 注释丢弃等）留在各自的求值侧。
+//! The evaluation stage produces an [`Item`] tree, and [`print`] writes it out as CSS in the
+//! shape described by [`Style`] (feeding the sourcemap at the same time). Dialect differences
+//! may only live in [`Style`] fields; semantic differences (dropping empty rules, dropping
+//! empty `@media`, keeping `{}` for `@font-face`, discarding `//` comments, etc.) stay on
+//! their respective evaluation side.
 
 use oxc_css_parser::pos::Span;
 
@@ -10,30 +13,36 @@ use crate::Options;
 use crate::merge::Merged;
 use crate::print::{Printer, SourceSegment};
 
-/// 产物形态配置：两个方言唯一允许不一致的地方。
+/// Output-shape configuration: the only place where the two dialects are allowed to differ.
 pub(crate) struct Style {
-    /// 每条 style rule（含 group_end 标记的组）之后是否补一个空行。
+    /// Whether to add a blank line after each style rule (including groups marked by
+    /// group_end).
     pub(crate) blank_line_after_rule: bool,
-    /// 选择器列表续行是否缩进到当前层级；false = 续行写在第 0 列。
+    /// Whether selector-list continuation lines are indented to the current level; false =
+    /// continuation lines start at column 0.
     pub(crate) indent_selector_continuation: bool,
-    /// 非 ASCII 内容时是否在开头补 `@charset "UTF-8";`。
+    /// Whether to prepend `@charset "UTF-8";` when the content is non-ASCII.
     pub(crate) charset: bool,
-    /// 产物末尾是否补换行。
+    /// Whether to add a trailing newline at the end of the output.
     pub(crate) trailing_newline: bool,
-    /// sourcemap 是否带 `sourcesContent`。两侧的产出条件**相反**（P11 已记录）：
-    /// dart（scss）恒写（WDT 的 render 参数恒带 `sourceMapContents: true`）；
-    /// less 4.1.3 只在多源时写（`outputSourceFiles` 跟 `@import` 内联走），
-    /// 单源 `.map` 里根本没有这个字段。less 侧调用时按 `multi_source` 覆盖。
+    /// Whether the sourcemap includes `sourcesContent`. The two sides have **opposite**
+    /// conditions (recorded in P11): dart (scss) always writes it (WDT's render parameters
+    /// always carry `sourceMapContents: true`), whereas less 4.1.3 writes it only with
+    /// multiple sources (`outputSourceFiles` follows `@import` inlining) and a single-source
+    /// `.map` has no such field at all. The less side overrides this from `multi_source` when
+    /// calling.
     pub(crate) sources_content: bool,
-    /// 块注释是否原样写出（保留源码的换行与续行缩进）。
+    /// Whether block comments are written verbatim (preserving the source's newlines and
+    /// continuation-line indentation).
     ///
-    /// true（less）：less 的注释节点直接回写原文，续行不重排；
-    /// false（dart）：按 `write_with_indent` 剥掉 `min(最小缩进, 注释起始列)` 再缩进。
+    /// true (less): less comment nodes write the original text straight back out, without
+    /// reflowing continuation lines; false (dart): `write_with_indent` strips
+    /// `min(minimum indentation, comment start column)` and then re-indents.
     pub(crate) verbatim_comments: bool,
 }
 
 impl Style {
-    /// dart-sass 1.35.2 的 expanded 产物形态（SCSS 通道）。
+    /// The expanded output shape of dart-sass 1.35.2 (SCSS pipeline).
     pub(crate) const SASS: Style = Style {
         blank_line_after_rule: true,
         indent_selector_continuation: false,
@@ -43,24 +52,30 @@ impl Style {
         verbatim_comments: false,
     };
 
-    /// less 4.1.3 的产物形态（LESS 通道）。四个字段都是从 lessc 实测反推的：
+    /// The output shape of less 4.1.3 (LESS pipeline). All fields are inferred from
+    /// measurements of lessc:
     ///
-    /// - `blank_line_after_rule = false`：相邻规则 / 注释 / `@media` 之间都只换行
-    ///   （`tests/fixtures/basic.css` 是 `}\n.a {`；bootstrap 3.4.1 的 144329 字节
-    ///   产物里 `\n\n\n` 出现 0 次）。
-    /// - `indent_selector_continuation = true`：选择器续行缩进到当前层级
-    ///   （`tests/fixtures/media-indent.css` 的 `@media print {` 里是 `  *,\n  *:before`；
-    ///   根层续行落在第 0 列，即 `.a,\n.b`）。
-    /// - `charset = false`：less 不按非 ASCII 补 `@charset`——weui-wxss 2.6.26 的产物
-    ///   含非 ASCII 注释却没有 `@charset`；源码里写的 `@charset` 由求值侧当普通
-    ///   at-rule 原样输出（less 只保留第一条，见 `less::Compiler::charset`）。
-    /// - `trailing_newline = true`：非空产物恒以单个 `\n` 结尾（fixture 全部如此），
-    ///   空输入产出 0 字节（`items` 为空时不补，见 [`print`]）。
-    /// - `sources_content`：基准值 `false`（单源不写），less 侧调用时按 `multi_source`
-    ///   覆盖——`@import` 内联后才与 dart 一样写 `sourcesContent`（实测：`basic.less`
-    ///   单源 map 无该字段，`import-multiple.less` 有）。
-    /// - `verbatim_comments = true`：less 的块注释直接回写源码字节（含续行缩进），
-    ///   不做 dart 的续行重排。
+    /// - `blank_line_after_rule = false`: only a newline appears between adjacent rules /
+    ///   comments / `@media` (`tests/fixtures/basic.css` has `}\n.a {`; in the 144329-byte
+    ///   bootstrap 3.4.1 output, `\n\n\n` occurs 0 times).
+    /// - `indent_selector_continuation = true`: selector continuation lines are indented to
+    ///   the current level (`@media print {` in `tests/fixtures/media-indent.css` contains
+    ///   `  *,\n  *:before`; at the root level continuation lines start at column 0, i.e.
+    ///   `.a,\n.b`).
+    /// - `charset = false`: less does not add `@charset` for non-ASCII content — the output
+    ///   of weui-wxss 2.6.26 contains non-ASCII comments but no `@charset`; an `@charset`
+    ///   written in the source is emitted as-is by the evaluation side as an ordinary
+    ///   at-rule (less keeps only the first one, see `less::Compiler::charset`).
+    /// - `trailing_newline = true`: non-empty output always ends with a single `\n` (as in
+    ///   every fixture), while empty input produces 0 bytes (nothing is added when `items`
+    ///   is empty, see [`print`]).
+    /// - `sources_content`: the baseline is `false` (not written for a single source), and
+    ///   the less side overrides it from `multi_source` when calling — only after `@import`
+    ///   inlining does it write `sourcesContent` like dart (measured: the single-source map
+    ///   of `basic.less` has no such field, while `import-multiple.less` has it).
+    /// - `verbatim_comments = true`: less block comments write the source bytes straight
+    ///   back out (including continuation-line indentation), without dart's reflowing of
+    ///   continuation lines.
     pub(crate) const LESS: Style = Style {
         blank_line_after_rule: false,
         indent_selector_continuation: true,
@@ -71,14 +86,16 @@ impl Style {
     };
 }
 
-/// 选择器列表：**逐输出行**的文本 + 该行的源锚点。
+/// A selector list: the text of **each output line** plus that line's source span.
 ///
-/// 拆行的唯一目的是让打印器给续行也打上 segment：dart 把列表的每一行都映射到
-/// 列表起点（同一段文本连写多行时每行拿到同一个源位置），所以这里各行共用
-/// 同一个 `Span`。文本逐字节等于未拆行的 `a,\nb` 形态。
+/// Splitting into lines exists solely so the printer can attach a segment to continuation
+/// lines too: dart maps every line of the list to the list's start (when one piece of text
+/// spans several lines, each line gets the same source position), so all lines here share one
+/// `Span`. The text is byte-for-byte equal to the unsplit `a,\nb` form.
 pub(crate) type SelectorLines = Vec<(String, Span)>;
 
-/// 把整段选择器文本按输出行拆成 [`SelectorLines`]（每行同一锚点）。
+/// Split the whole selector text into [`SelectorLines`] by output line (one shared span per
+/// line).
 pub(crate) fn selector_lines(text: &str, span: Span) -> SelectorLines {
     text.split('\n')
         .map(|line| (line.to_string(), span))
@@ -89,16 +106,17 @@ pub(crate) fn selector_lines(text: &str, span: Span) -> SelectorLines {
 pub(crate) struct Rule {
     pub(crate) selector: SelectorLines,
     pub(crate) body: Body,
-    /// dart-sass 的 `isGroupEnd`：该源规则（含其嵌套产物）的最后一个节点，
-    /// 序列化后跟一个空行。
+    /// dart-sass's `isGroupEnd`: the last node of this source rule (including its nested
+    /// output), followed by a blank line after serialization.
     pub(crate) group_end: bool,
-    /// 扩展引擎里的编号（`@extend` 用它回写选择器）。
+    /// The id used by the extend engine (`@extend` writes selectors back through it).
     pub(crate) extend_id: Option<usize>,
-    /// 扩展后只剩占位符选择器：这条规则不产出输出。
+    /// After extension only placeholder selectors remain: this rule produces no output.
     pub(crate) placeholder: bool,
 }
 
-/// `@keyframes` 内部的 keyframe 规则：与 style rule 不同，彼此之间**没有**空行。
+/// A keyframe rule inside `@keyframes`: unlike style rules, there are **no** blank lines
+/// between them.
 #[derive(Clone)]
 pub(crate) struct Keyframe {
     pub(crate) selector: SelectorLines,
@@ -112,7 +130,8 @@ pub(crate) struct AtRule {
     pub(crate) prelude: String,
     pub(crate) body: Option<Body>,
     pub(crate) group_end: bool,
-    /// 嵌套 `@media` 合并后要「提到外层 media 之外」成为兄弟节点的标记。
+    /// Marks a node that should be lifted outside the enclosing media to become a sibling
+    /// after nested `@media` merging.
     pub(crate) hoist: bool,
 }
 
@@ -120,7 +139,8 @@ pub(crate) struct AtRule {
 pub(crate) struct Comment {
     pub(crate) text: String,
     pub(crate) span: Span,
-    /// 源码里 `/*` 所在的 0-based 列（dart 的注释重排以它为上界）。
+    /// The 0-based column of `/*` in the source (dart's comment re-indentation is bounded by
+    /// it).
     pub(crate) column: usize,
 }
 
@@ -130,20 +150,23 @@ pub(crate) struct Decl {
     pub(crate) name_span: Span,
     pub(crate) value: String,
     pub(crate) value_span: Span,
-    /// 源码里是不是自定义属性（`--x: ...`）。只按源码判定：`#{$p}: $v` 里
-    /// `$v` 是普通 SassScript，输出仍带 `: `。
+    /// Whether this is a custom property (`--x: ...`) in the source. Decided purely from the
+    /// source: in `#{$p}: $v`, `$v` is ordinary SassScript and the output still has `: `.
     pub(crate) custom: bool,
-    /// 自定义属性值里带换行时的重排参数（dart 的 `_writeReindentedValue`），
-    /// 缩进量取决于声明所在的输出层级，所以只记录要剥掉的列数。
+    /// Re-layout parameters for a custom property value containing newlines (dart's
+    /// `_writeReindentedValue`); the indentation depends on the output level of the
+    /// declaration, so only the number of columns to strip is recorded.
     pub(crate) custom_strip: Option<CustomStrip>,
 }
 
-/// 自定义属性值的重排方式（dart 的 `_writeReindentedValue` 三个分支）。
+/// How a custom property value is re-laid out (the three branches of dart's
+/// `_writeReindentedValue`).
 #[derive(Clone, Copy)]
 pub(crate) enum CustomStrip {
-    /// 有换行但没有带缩进的行：`trim_end` 后补一个空格。
+    /// Has newlines but no indented lines: `trim_end` and append one space.
     Trailing,
-    /// 每行剥掉 `n` 列（`min(最小缩进, 声明名所在列)`）。
+    /// Strip `n` columns from each line (`min(minimum indentation, declaration name
+    /// column)`).
     Indent(usize),
 }
 
@@ -153,22 +176,29 @@ pub(crate) enum Item {
     Keyframe(Keyframe),
     AtRule(AtRule),
     Comment(Comment),
-    /// 原样输出的片段（less 迁移期用）：文本 + 内部 `(字节偏移, span)` 锚点。
+    /// A fragment output verbatim (used during the less migration): text + internal
+    /// `(byte offset, span)` anchors.
     Raw(Raw),
 }
 
-/// 原样片段：任意 CSS 文本 + 内部 `(字节偏移, span)` 锚点（`marks` 按偏移升序，
-/// 每段从该偏移写到下一个 mark 或文本末尾）。
+/// A verbatim fragment: arbitrary CSS text + internal `(byte offset, span)` anchors (`marks`
+/// is sorted by offset ascending, and each piece runs from that offset to the next mark or
+/// the end of the text).
 ///
-/// 只给「无法用结构化节点表达」的四类文本用（less 侧，见 `less/emit.rs`）：
+/// Used only for the four kinds of text that "cannot be expressed with structured nodes"
+/// (on the less side, see `less/emit.rs`):
 ///
-/// 1. `(reference)` 紧凑体（`a: 1;b: 2;`）：less 的 `ruleset.genCSS` 对不可见声明
-///    不插换行，而 `Body::Decls` 的打印恒是一行一条；
-/// 2. `@import (inline) "x"` 的文件内容：不解析、原文写出；
-/// 3. `@import "x.less"` 的子编译产物：一段完整 CSS（含自己的换行与缩进）；
-/// 4. 根层裸函数调用 `e("…")` 的内文：求值结果本身就是一段 CSS 文本。
+/// 1. compact `(reference)` bodies (`a: 1;b: 2;`): less's `ruleset.genCSS` inserts no
+///    newline for invisible declarations, whereas printing `Body::Decls` is always one per
+///    line;
+/// 2. the file contents of `@import (inline) "x"`: not parsed, written out verbatim;
+/// 3. the sub-compilation output of `@import "x.less"`: a complete piece of CSS (with its
+///    own newlines and indentation);
+/// 4. the body of a bare root-level function call `e("…")`: the evaluation result is
+///    itself a piece of CSS text.
 ///
-/// 注释/声明/规则一律走结构化节点（形态差异由 [`Style`] 表达）。
+/// Comments/declarations/rules always go through structured nodes (shape differences are
+/// expressed by [`Style`]).
 #[derive(Clone)]
 pub(crate) struct Raw {
     pub(crate) text: String,
@@ -191,7 +221,8 @@ pub(crate) enum Body {
 pub(crate) enum DeclItem {
     Decl(Decl),
     Comment(Comment),
-    /// 规则内的无块 at-rule（dart 只保留 `@import "x.css"` 这一种，缩进写在花括号里）。
+    /// A blockless at-rule inside a rule (dart keeps only `@import "x.css"`, with its
+    /// indentation inside the braces).
     AtRule(AtRule),
 }
 
@@ -200,7 +231,8 @@ impl Item {
         matches!(self, Item::AtRule(at) if at.hoist)
     }
 
-    /// 摘掉 hoist 标记；同一源规则拆出来的段之间不留空行。
+    /// Clear the hoist flag; no blank lines are left between the segments split out of one
+    /// source rule.
     pub(crate) fn clear_hoist(&mut self) {
         if let Item::AtRule(at) = self {
             at.hoist = false;
@@ -216,7 +248,7 @@ impl Item {
         }
     }
 
-    /// 序列化前扫描非 ASCII：决定是否补 `@charset "UTF-8";`。
+    /// Scan for non-ASCII before serializing: decides whether to add `@charset "UTF-8";`.
     pub(crate) fn is_ascii(&self) -> bool {
         match self {
             Item::Rule(r) => {
@@ -262,11 +294,13 @@ enum Ctx {
     Keyframes,
 }
 
-/// 打印整个样式表。`style` 决定空行 / 续行缩进 / `@charset` / 尾随换行 /
-/// `sourcesContent` / 注释是否原样输出。
+/// Print the whole stylesheet. `style` decides blank lines / continuation-line indentation /
+/// `@charset` / trailing newline / `sourcesContent` / whether comments are written verbatim.
 ///
-/// 多文件（`@import` 内联）时把所有源文件与段表交给打印器：token 的 span 全是
-/// 合并串坐标，收尾时二分回「哪个文件 + 文件内偏移」再换算行列。
+/// With multiple files (`@import` inlining), all source files and the segment table are
+/// handed to the printer: every token span is in merged-text coordinates, and the finishing
+/// pass binary-searches back to "which file + offset within that file" before converting to
+/// line/column.
 pub(crate) fn print(
     items: &[Item],
     style: &Style,
@@ -279,8 +313,9 @@ pub(crate) fn print(
     for file in merged.files.iter().skip(1) {
         printer.add_file(&file.path.to_string_lossy(), &file.text);
     }
-    // `sourcesContent`：两侧产出条件相反（见 `Style::sources_content`）。
-    // 写入的是 `original`：less 的 `text` 是词法修补后的版本（span 坐标系），原文另存。
+    // `sourcesContent`: the two sides have opposite emission conditions (see
+    // `Style::sources_content`). What is written is `original`: less's `text` is the lexically
+    // patched version (the span coordinate system), and the original is stored separately.
     if style.sources_content {
         for (i, file) in merged.files.iter().enumerate() {
             printer.set_content(i as u32, &file.original);
@@ -314,7 +349,8 @@ fn emit_items(items: &[Item], style: &Style, ctx: Ctx, indent: usize, printer: &
     for (i, item) in items.iter().enumerate() {
         if i > 0 {
             printer.newline();
-            // 空行属于「前一个规则组（源规则 + 其嵌套产物）的收尾」。
+            // The blank line belongs to "the end of the previous rule group (source rule + its
+            // nested output)".
             if style.blank_line_after_rule && ctx == Ctx::Rules && items[i - 1].is_group_end() {
                 printer.newline();
             }
@@ -343,9 +379,10 @@ fn emit_item(item: &Item, style: &Style, indent: usize, printer: &mut Printer) {
     }
 }
 
-/// 选择器输出：首行带缩进；续行默认从第 0 列开始（dart 实测：`@media` 里的多行
-/// 选择器续行也不缩进），`indent_selector_continuation` 打开时缩进到当前层级。
-/// 每行各自 `token`，续行才有 segment。
+/// Selector output: the first line is indented; continuation lines start at column 0 by
+/// default (measured with dart: multi-line selectors inside `@media` are not indented
+/// either), and are indented to the current level when `indent_selector_continuation` is on.
+/// Each line gets its own `token`, so continuation lines have segments.
 fn emit_selector(selector: &SelectorLines, style: &Style, indent: usize, printer: &mut Printer) {
     for (i, (text, span)) in selector.iter().enumerate() {
         if i == 0 {
@@ -360,7 +397,8 @@ fn emit_selector(selector: &SelectorLines, style: &Style, indent: usize, printer
     }
 }
 
-/// 原样片段：整段按当前缩进写一次，`marks` 按字节偏移切段并各自打映射。
+/// A verbatim fragment: the whole piece is written once at the current indentation, and
+/// `marks` splits it by byte offset with a mapping for each part.
 fn emit_raw(raw: &Raw, indent: usize, printer: &mut Printer) {
     printer.indent(indent);
     let text = raw.text.as_str();
@@ -378,12 +416,15 @@ fn emit_raw(raw: &Raw, indent: usize, printer: &mut Printer) {
     }
 }
 
-/// 注释序列化。dart 侧用与自定义属性值同一套重排（dart 的 `_writeWithIndent`）：
-/// 续行先剥掉 `min(最小缩进, 注释起始列)`，再补上当前缩进，空行保持真空行；
-/// less 侧（[`Style::verbatim_comments`]）直接回写源码字节。
+/// Comment serialization. The dart side uses the same re-layout as custom property values
+/// (dart's `_writeWithIndent`): continuation lines first have
+/// `min(minimum indentation, comment start column)` stripped, then get the current
+/// indentation, and empty lines stay truly empty; the less side
+/// ([`Style::verbatim_comments`]) writes the source bytes straight back out.
 ///
-/// dart 给注释的每一行都打 segment（全部指向 `/*` 起点），这里逐行 `token`；
-/// less 的注释在旧实现里是不映射的原文，所以原样分支整条 `raw`（保持 map 字节）。
+/// dart attaches a segment to every line of a comment (all pointing at the `/*` start), so
+/// each line is `token`ed here; in the old implementation less comments were unmapped raw
+/// text, so the verbatim branch emits the whole thing with `raw` (keeping the map bytes).
 fn emit_comment(comment: &Comment, style: &Style, indent: usize, printer: &mut Printer) {
     let text = format!("/*{}*/", comment.text);
     printer.indent(indent);
@@ -399,7 +440,8 @@ fn emit_comment(comment: &Comment, style: &Style, indent: usize, printer: &mut P
                 text.split_once('\n').map_or(&text, |(first, _)| first),
                 comment.span,
             );
-            // `write_with_indent` 以 `\n` 开头：续行逐行拆开，空行只留换行。
+            // `write_with_indent` starts with a `\n`: continuation lines are split out one by
+            // one, and empty lines keep only the newline.
             let rest = write_with_indent(&text, strip, indent);
             for line in rest.split('\n').skip(1) {
                 printer.newline();
@@ -411,7 +453,8 @@ fn emit_comment(comment: &Comment, style: &Style, indent: usize, printer: &mut P
     }
 }
 
-/// 换行之后「最浅的非空行」的缩进（字符计列）。没有换行返回 `None`。
+/// The indentation of the "shallowest non-empty line" after a newline (columns counted in
+/// characters). Returns `None` when there is no newline.
 fn minimum_indentation(text: &str) -> Option<usize> {
     let mut lines = text.split('\n');
     lines.next()?;
@@ -423,15 +466,16 @@ fn minimum_indentation(text: &str) -> Option<usize> {
         .min()
 }
 
-/// dart 的 `_writeWithIndent`：把 [text] 第一行之后的内容逐行按 [strip] 剥离后
-/// 重新缩进到 [indent] 层（第一行由调用方输出）。空行只输出换行符（不留空白）；
-/// 文本以空白结尾时压缩成一个空格。
+/// dart's `_writeWithIndent`: everything after the first line of [text] is stripped line by
+/// line by [strip] and re-indented to level [indent] (the caller writes the first line).
+/// Empty lines emit only the newline (no whitespace); text ending in whitespace is compressed
+/// into a single space.
 fn write_with_indent(text: &str, strip: usize, indent: usize) -> String {
     let pad = "  ".repeat(indent);
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len() + pad.len());
     let mut i = 0;
-    // 跳到第一行末尾。
+    // Skip to the end of the first line.
     while i < chars.len() && chars[i] != '\n' {
         i += 1;
     }
@@ -440,7 +484,8 @@ fn write_with_indent(text: &str, strip: usize, indent: usize) -> String {
         let mut line_start = i;
         loop {
             if i >= chars.len() {
-                // 结尾只剩空白：dart 换成单个空格（自定义属性靠它保持分隔）。
+                // Only whitespace remains at the end: dart replaces it with a single space
+                // (custom properties rely on it to keep the separation).
                 out.push(' ');
                 return out;
             }
@@ -473,7 +518,8 @@ fn write_with_indent(text: &str, strip: usize, indent: usize) -> String {
 
 fn emit_at_rule(at: &AtRule, style: &Style, indent: usize, printer: &mut Printer) {
     printer.indent(indent);
-    // dart 把 at-rule 整条映射到 `@` 所在列（`name_span` 指向名字本身）。
+    // dart maps the whole at-rule to the column of `@` (`name_span` points at the name
+    // itself).
     printer.token(
         &format!("@{}", at.name),
         Span {
@@ -518,7 +564,8 @@ fn emit_body(body: &Body, style: &Style, indent: usize, ctx: Ctx, printer: &mut 
                         printer.indent(indent);
                         printer.token(&decl.name, decl.name_span);
                         if decl.custom {
-                            // 自定义属性保留原文（空白已折叠），冒号后不额外插空格。
+                            // Custom properties keep their original text (whitespace already
+                            // collapsed); no extra space after the colon.
                             printer.raw(":");
                             let tail = match decl.custom_strip {
                                 None => std::borrow::Cow::Borrowed(decl.value.as_str()),
@@ -567,29 +614,30 @@ mod tests {
             .css
     }
 
-    /// 逃生舱：`Raw` 整段原样输出（含非 ASCII），`marks` 在对应偏移处打 segment。
+    /// Escape hatch: a whole `Raw` piece is printed verbatim (including non-ASCII), and
+    /// `marks` attach a segment at the corresponding offsets.
     #[test]
     fn raw_is_printed_and_mapped() {
-        let source = "中文 raw";
+        let source = "abc€ raw";
         let mut merged = Merged::new();
         merged.add_file(Path::new("t.scss"), source.to_string(), source.to_string());
         let items = vec![Item::from(Raw {
-            text: "中文\n.x".to_string(),
+            text: "abc€\n.x".to_string(),
             marks: vec![
                 (0, Span { start: 0, end: 0 }),
                 (7, Span { start: 3, end: 5 }),
             ],
         })];
-        assert!(!items.iter().all(Item::is_ascii), "非 ASCII 要能被扫到");
+        assert!(!items.iter().all(Item::is_ascii), "expected non-ASCII");
 
         let opts = Options {
             source_map: true,
             ..Default::default()
         };
         let (css, map) = print(&items, &Style::SASS, "t.scss", &merged, &opts);
-        assert_eq!(css, "@charset \"UTF-8\";\n中文\n.x");
+        assert_eq!(css, "@charset \"UTF-8\";\nabc€\n.x");
         let map: serde_json::Value = serde_json::from_str(&map.expect("map")).unwrap();
-        // 两段各一条映射（charset 行没有映射）。
+        // One mapping per piece (the charset line has no mapping).
         let mapped_lines = map["mappings"]
             .as_str()
             .unwrap()
@@ -609,20 +657,20 @@ mod tests {
             render(".a{color:red}@media screen{.b{color:blue}}"),
             ".a {\n  color: red;\n}\n\n@media screen {\n  .b {\n    color: blue;\n  }\n}"
         );
-        // at-rule → rule 没有空行
+        // at-rule → rule: no blank line
         assert_eq!(
             render("@media screen{.a{color:red}}.b{color:blue}"),
             "@media screen {\n  .a {\n    color: red;\n  }\n}\n.b {\n  color: blue;\n}"
         );
-        // @media 内相邻 rule 之间有空行
+        // blank line between adjacent rules inside @media
         assert_eq!(
             render("@media screen{.a{color:red}.b{color:blue}}"),
             "@media screen {\n  .a {\n    color: red;\n  }\n\n  .b {\n    color: blue;\n  }\n}"
         );
     }
 
-    /// D1：声明内部（属性名与值之间 / 值之后到 `;` 或 `}`）的注释整段丢弃，
-    /// 只有语句级注释保留。
+    /// D1: comments inside a declaration (between property name and value / after the value
+    /// up to `;` or `}`) are dropped entirely; only statement-level comments are kept.
     #[test]
     fn comments_inside_declarations_are_dropped() {
         assert_eq!(render(".a{width:1px /* t */ }"), ".a {\n  width: 1px;\n}");
@@ -635,7 +683,7 @@ mod tests {
             render(".a{width:1px /* t */ !important}"),
             ".a {\n  width: 1px !important;\n}"
         );
-        // 语句级保留（`;` 之后、块首、块尾）
+        // Statement-level ones are kept (after `;`, at block start, at block end)
         assert_eq!(
             render(".a{color:red; /* t */}"),
             ".a {\n  color: red;\n  /* t */\n}"
@@ -646,7 +694,7 @@ mod tests {
         );
     }
 
-    /// D2：只有 `nth-child` / `nth-last-child` 归一 An+B；`nth-of-type` 不动。
+    /// D2: only `nth-child` / `nth-last-child` normalize An+B; `nth-of-type` is left alone.
     #[test]
     fn anb_selector_normalization() {
         assert_eq!(
@@ -669,7 +717,8 @@ mod tests {
             render(":nth-child(2n + 1 of .a, .b){x:1}"),
             ":nth-child(2n+1 of .a, .b) {\n  x: 1;\n}"
         );
-        // nth-of-type / nth-last-of-type 实测不归一（空白按普通选择器折叠）
+        // nth-of-type / nth-last-of-type are not normalized in practice (whitespace is
+        // collapsed as for a regular selector)
         assert_eq!(
             render(":nth-of-type( -n + 3 ){x:1}"),
             ":nth-of-type(-n + 3) {\n  x: 1;\n}"
@@ -678,11 +727,12 @@ mod tests {
             render(":nth-of-type(2N+1){x:1}"),
             ":nth-of-type(2N+1) {\n  x: 1;\n}"
         );
-        // 非 An+B 伪类参数不受影响
+        // Non-An+B pseudo-class arguments are unaffected
         assert_eq!(render(":not(.a + .b){x:1}"), ":not(.a + .b) {\n  x: 1;\n}");
     }
 
-    /// D3：根层 `@import` 前移到开头注释段之后，其它节点相对顺序不变。
+    /// D3: root-level `@import`s are hoisted to after the leading comment block; the relative
+    /// order of all other nodes is unchanged.
     #[test]
     fn root_imports_are_hoisted() {
         assert_eq!(
@@ -697,17 +747,18 @@ mod tests {
             render("@page{margin:1cm}@import url(x.css);@namespace svg url(http://x);"),
             "@import url(x.css);\n@page {\n  margin: 1cm;\n}\n@namespace svg url(http://x);"
         );
-        // 开头的注释不跨过，import 插在它后面
+        // The leading comment is not crossed; the import is inserted after it
         assert_eq!(
             render("/* lead */@import url(a.css);.a{v:1}"),
             "/* lead */\n@import url(a.css);\n.a {\n  v: 1;\n}"
         );
-        // 尾随 import 被前移，但注释保持与原语句的相对顺序
+        // A trailing import is hoisted, but comments keep their relative order with the
+        // original statements
         assert_eq!(
             render(".a{v:1}/* c */@import url(x.css);"),
             "@import url(x.css);\n.a {\n  v: 1;\n}\n\n/* c */"
         );
-        // 嵌套在 @media 里的 import 不前移
+        // An import nested inside @media is not hoisted
         assert_eq!(
             render("@media screen{@import url(a.css);}.a{v:1}"),
             "@media screen {\n  @import url(a.css);\n}\n.a {\n  v: 1;\n}"
@@ -725,7 +776,7 @@ mod tests {
             render(".a{color:red}/* c */.b{color:blue}"),
             ".a {\n  color: red;\n}\n\n/* c */\n.b {\n  color: blue;\n}"
         );
-        // 带注释的空规则保留
+        // An empty rule with a comment is kept
         assert_eq!(render(".a{/* c */}"), ".a {\n  /* c */\n}");
     }
 
@@ -733,7 +784,7 @@ mod tests {
     fn empty_rules_removed() {
         assert_eq!(render(".a{}\n.b{color:red}"), ".b {\n  color: red;\n}");
         assert_eq!(render("@media screen{}"), "");
-        // 非条件 at-rule 的空块保留
+        // Empty blocks of non-conditional at-rules are kept
         assert_eq!(render("@font-face{}"), "@font-face {}");
         assert_eq!(render("@foo bar{}"), "@foo bar {}");
     }
@@ -742,8 +793,8 @@ mod tests {
     fn charset_and_no_trailing_newline() {
         assert_eq!(render(".a{color:red}"), ".a {\n  color: red;\n}");
         assert_eq!(
-            render(".a{content:\"中\"}"),
-            "@charset \"UTF-8\";\n.a {\n  content: \"中\";\n}"
+            render(".a{content:\"か\"}"),
+            "@charset \"UTF-8\";\n.a {\n  content: \"か\";\n}"
         );
         assert!(!render(".a{color:red}").ends_with('\n'));
     }
@@ -782,7 +833,8 @@ mod tests {
             render(".a{--x: a !important}"),
             ".a {\n  --x: a !important;\n}"
         );
-        // 续行按「源列 - 声明列 + 输出缩进」重排（dart-sass 实测）
+        // Continuation lines are reindented by "source column - declaration column + output
+        // indent" (measured against dart-sass)
         assert_eq!(render(".a{--x: a\n    b}"), ".a {\n  --x: a\n   b;\n}");
     }
 
@@ -796,7 +848,8 @@ mod tests {
 
     #[test]
     fn empty_at_rule_blocks() {
-        // media / supports 的空块整块删除；layer / font-face 等保留
+        // Empty blocks of media / supports are deleted entirely; layer / font-face etc. are
+        // kept
         assert_eq!(render("@media screen{}"), "");
         assert_eq!(render("@supports (a:b){}"), "");
         assert_eq!(render("@layer base{}"), "@layer base {}");

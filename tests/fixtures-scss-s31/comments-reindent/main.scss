@@ -1,16 +1,16 @@
-// 注释续行：输出缩进 − 源注释所在列 的平移；制表符按字符保留、按列计算。
+// comment continuation lines: shifted by output indent − the column of the source comment; tabs are preserved per character and computed per column.
 .a {
 	/* note
 		transform: none; */
 	x: 1;
 }
 
-// 块注释里的空行必须是真空行（不补缩进空格）。
+// blank lines inside a block comment must be truly empty (no indent spaces added).
 /* .goods-price{
 
 } */
 
-// 续行缩进比注释起点更浅时，剥到注释起点为止。
+// when a continuation line is indented less than the comment start, strip it down to the comment start.
 .b {
     /* one
        two
@@ -18,7 +18,7 @@
   y: 2;
 }
 
-// 嵌套规则里的注释按自己的层级重排。
+// comments inside nested rules are reindented according to their own level.
 .c {
   .d {
     /* deep

@@ -1,4 +1,4 @@
-// 块注释的归属：值内原位、属性名后丢弃、选择器内丢弃、at-rule 前后
+// block comment placement: kept in place inside values, dropped after property names, dropped inside selectors, around at-rules
 @base: 4px /* keep */;
 
 .bg {
@@ -8,7 +8,7 @@
   size: @base;
 }
 
-// selector 内与头部注释被 less 丢掉
+// comments inside the selector and in the header are dropped by less
 #planadvisor,
 /* drop */ .first,
 /* drop */.planning {

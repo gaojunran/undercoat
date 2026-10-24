@@ -2,7 +2,7 @@
   font-weight: bold;
 }
 .z {
-  /* 体内注释保留，且与声明紧凑拼接 */a: 1;b: 2;c: 3;
+  /* comments in the body are kept and squeezed right against the declarations */a: 1;b: 2;c: 3;
 }
 @media screen {
   .y {

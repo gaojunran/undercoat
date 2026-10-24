@@ -1,18 +1,21 @@
-//! `@extend` 与占位符选择器（`%p`）。
+//! `@extend` and placeholder selectors (`%p`).
 //!
-//! 语义按 dart-sass 的 `ExtensionStore`：扩展是**增量**应用的——每条新 `@extend`
-//! 只作用在当时已经登记过的规则上，规则在登记时才吸收此刻已有的全部扩展。
-//! 输出顺序正是这个过程的副产品（`.b, .e, .d, .c` 而非 `.b, .c, .d, .e`），
-//! 所以这里记录「注册/扩展」事件流，最后按顺序回放，而不是一次性求闭包。
+//! Semantics follow dart-sass's `ExtensionStore`: extensions are applied
+//! **incrementally** -- each new `@extend` only affects the rules already registered at
+//! that point, and a rule absorbs all extensions that exist when it is registered. The
+//! output order is a by-product of this process (`.b, .e, .d, .c` rather than
+//! `.b, .c, .d, .e`), so we record a stream of "register/extension" events and replay it
+//! in order at the end, instead of computing the closure once.
 //!
-//! 选择器模型只覆盖 SCSS 需要的部分：组合符 + 复合选择器（简单选择器切片）。
-//! 复合选择器内部不展开 `:not(...)` / `:is(...)` 之类的嵌套选择器。
+//! The selector model covers only what SCSS needs: combinators + compound selectors
+//! (slices of simple selectors). Nested selectors such as `:not(...)` / `:is(...)` are
+//! not expanded inside a compound selector.
 
 use oxc_css_parser::pos::Span;
 
 use crate::doc::{Body, Item, selector_lines};
 
-/// 一条复杂选择器。
+/// One complex selector.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Sel {
     pub(crate) parts: Vec<Part>,
@@ -21,7 +24,7 @@ pub(crate) struct Sel {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Part {
-    /// 前导组合符（`>`/`+`/`~`），`None` 表示后代或首段。
+    /// Leading combinator (`>`/`+`/`~`); `None` means descendant or the first segment.
     pub(crate) combinator: Option<char>,
     pub(crate) compound: Compound,
 }
@@ -36,7 +39,8 @@ impl Compound {
         self.simples.concat()
     }
 
-    /// 复合选择器里有没有 `%p`（不管还有没有别的简单选择器）。
+    /// Whether the compound selector contains `%p` (regardless of any other simple
+    /// selector).
     fn has_placeholder(&self) -> bool {
         self.simples.iter().any(|s| s.starts_with('%'))
     }
@@ -56,7 +60,7 @@ impl Sel {
                     None => out.push(' '),
                 }
             } else if let Some(c) = part.combinator {
-                // 引导组合符（`> .b`）：选择器函数允许这种写法。
+                // Leading combinator (`> .b`): the selector functions allow this form.
                 out.push(c);
                 out.push(' ');
             }
@@ -65,7 +69,8 @@ impl Sel {
         out
     }
 
-    /// 末段组合符会被 `@extend` 的宿主组合符拼接，所以单独看「有多段」时忽略它。
+    /// The combinator of the last segment is joined with the host combinator of `@extend`,
+    /// so it is ignored when looking at "how many segments" there are.
     fn single_compound(&self) -> Option<&Compound> {
         match self.parts.as_slice() {
             [part] if part.combinator.is_none() => Some(&part.compound),
@@ -74,18 +79,19 @@ impl Sel {
     }
 }
 
-/// 一条 `@extend` 登记。
+/// One `@extend` registration.
 #[derive(Clone)]
 pub(crate) struct Extension {
-    /// 扩展者（`@extend` 所在规则的选择器，可能有多条）。
+    /// The extender (the selector of the rule containing `@extend`, possibly several).
     pub(crate) extenders: Vec<Sel>,
-    /// 被扩展的复合选择器（`%p`, `.btn-sm`, `h1`）。
+    /// The extended compound selector (`%p`, `.btn-sm`, `h1`).
     pub(crate) target: Compound,
     pub(crate) optional: bool,
     pub(crate) span: usize,
 }
 
-/// 事件流：规则登记 / 扩展登记。回放顺序即 dart 的增量语义。
+/// Event stream: rule registration / extension registration. The replay order is what
+/// implements dart's incremental semantics.
 enum Event {
     Rule,
     Extend(Extension),
@@ -93,18 +99,21 @@ enum Event {
 
 #[derive(Default)]
 pub(crate) struct Engine {
-    /// 每条规则的选择器（下标即登记顺序）。
+    /// Selectors of each rule (the index is the registration order).
     pub(crate) lists: Vec<Vec<Sel>>,
     events: Vec<Event>,
-    /// 已登记规则数（回放时用）。
+    /// Number of registered rules (used while replaying).
     registered: usize,
-    /// 所有登记过的规则选择器里出现过的简单选择器。`!optional` 校验用它：
-    /// dart 的 `_selectors` 表在整轮编译里是累积的，且校验发生在最后
-    /// （所以 `@extend %p` 写在 `%p` 定义之前也合法）。
+    /// Simple selectors that appeared in any registered rule selector. Used by the
+    /// `!optional` check: dart's `_selectors` table accumulates over the whole compilation
+    /// and the check happens at the end (so `@extend %p` written before `%p` is defined is
+    /// legal).
     known: std::collections::HashSet<String>,
-    /// 已登记的扩展（按登记顺序）：新规则 / 新扩展者要立刻吸收它们。
+    /// Registered extensions (in registration order): new rules / new extenders must
+    /// absorb them immediately.
     ext_list: Vec<Extension>,
-    /// 哪些规则的选择器真的被改写过（没改过的保持 S2 的原文，避免往返渲染差异）。
+    /// Which rules had their selectors actually rewritten (untouched ones keep their S2
+    /// text, avoiding round-trip rendering differences).
     pub(crate) dirty: Vec<bool>,
 }
 
@@ -113,9 +122,10 @@ impl Engine {
         Self::default()
     }
 
-    /// 登记一条规则，返回它的编号。
+    /// Register a rule and return its id.
     pub(crate) fn add_rule(&mut self, mut selectors: Vec<Sel>) -> usize {
-        // 登记时刻一次性吸收已有扩展（整张表一起作用，顺序即登记顺序）。
+        // Absorb the existing extensions once at registration time (the whole table applies
+        // together, in registration order).
         let table = self.table();
         let mut dirty = false;
         if !table.is_empty() {
@@ -139,8 +149,9 @@ impl Engine {
         id
     }
 
-    /// 登记规则选择器（即使这条规则最终不产出 CSS，比如只写了 `@extend` 的
-    /// 嵌套规则）：`!optional` 校验和扩展链都要看得到它。
+    /// Register a rule selector (even when the rule emits no CSS in the end, such as a
+    /// nested rule that only contains `@extend`): both the `!optional` check and the
+    /// extension chain must see it.
     pub(crate) fn note_selectors(&mut self, selectors: &[Sel]) {
         for sel in selectors {
             for part in &sel.parts {
@@ -152,8 +163,9 @@ impl Engine {
     }
 
     pub(crate) fn add_extension(&mut self, mut extension: Extension) {
-        // 新扩展者本身可能已被既有扩展改写（`.navbar > .container-fluid` 的
-        // `.container-fluid` 已被 `.container-*` 扩展）。
+        // The new extender itself may already have been rewritten by existing extensions
+        // (`.container-fluid` of `.navbar > .container-fluid` has already been extended by
+        // `.container-*`).
         let table = self.table();
         if !table.is_empty() {
             if let Some(extended) = extend_list(&extension.extenders, &table) {
@@ -164,7 +176,8 @@ impl Engine {
         self.events.push(Event::Extend(extension));
     }
 
-    /// 当前扩展表（目标复合选择器 → 扩展），顺序即登记顺序。
+    /// The current extension table (target compound selector -> extensions), in
+    /// registration order.
     fn table(&self) -> Vec<(Compound, Extension)> {
         self.ext_list
             .iter()
@@ -176,7 +189,7 @@ impl Engine {
         self.events.is_empty()
     }
 
-    /// 回放事件流，把扩展结果写回 `lists`。
+    /// Replay the event stream and write the extension results back into `lists`.
     pub(crate) fn resolve(&mut self) {
         let mut registered = 0usize;
         for index in 0..self.events.len() {
@@ -217,7 +230,7 @@ impl Engine {
         }
     }
 
-    /// 第一条没匹配到目标、又没写 `!optional` 的扩展的位置。
+    /// Position of the first extension that matched no target and has no `!optional`.
     pub(crate) fn unmatched(&self) -> Option<usize> {
         self.events.iter().find_map(|event| match event {
             Event::Extend(extension)
@@ -235,17 +248,20 @@ impl Engine {
     }
 }
 
-/// 一条扩展产物连同它的「来源扩展者」文本。
+/// One extension product together with the text of its "source extender".
 ///
-/// dart 的 `_trim` 只在**同一来源**的产物之间做覆盖判定：`.column` 与
-/// `.column:last-child` 都被 `.columns` 扩展时，`.columns:last-child` 被 `.columns`
-/// 覆盖而丢掉；不同 `@extend` 产出的 `.reveal.tiny` 与 `.reveal` 则都保留。
+/// dart's `_trim` only decides overriding between products of the **same source**: when
+/// both `.column` and `.column:last-child` are extended by `.columns`,
+/// `.columns:last-child` is dropped as covered by `.columns`; `.reveal.tiny` and
+/// `.reveal` produced by different `@extend`s are both kept.
 #[derive(Clone)]
 struct Produced {
     sel: Sel,
-    /// 是不是扩展产物（源码里原样的选择器是 `false`）。
+    /// Whether this is an extension product (`false` for a selector that is verbatim from
+    /// the source).
     fresh: bool,
-    /// 产物的来源扩展者（只有「单一扩展者参与」的产物才有）。
+    /// The source extender of the product (only present for products where "a single
+    /// extender" took part).
     origin: Option<String>,
 }
 
@@ -259,7 +275,8 @@ impl Produced {
     }
 }
 
-/// 用 `table`（目标复合选择器 → 扩展）扩展一组选择器；无变化时返回 `None`。
+/// Extend a set of selectors with `table` (target compound selector -> extensions);
+/// returns `None` when nothing changed.
 fn extend_list(list: &[Sel], table: &[(Compound, Extension)]) -> Option<Vec<Sel>> {
     let mut out: Vec<Produced> = Vec::with_capacity(list.len());
     let mut changed = false;
@@ -279,8 +296,9 @@ fn extend_list(list: &[Sel], table: &[(Compound, Extension)]) -> Option<Vec<Sel>
     changed.then(|| trim(out))
 }
 
-/// `wide` 是否覆盖 `narrow`：段数、组合符一致或更宽松，且每段的简单选择器都是
-/// `narrow` 的子集（`.b` 覆盖 `.b:hover`、`li` 覆盖 `li.a`）；完全相等也算。
+/// Whether `wide` covers `narrow`: the segment count and the combinators are equal or
+/// more lenient, and the simple selectors of every segment are a subset of `narrow`'s
+/// (`.b` covers `.b:hover`, `li` covers `li.a`); full equality counts as well.
 fn subsumes(wide: &Sel, narrow: &Sel) -> bool {
     if wide.parts.len() != narrow.parts.len() {
         return false;
@@ -294,15 +312,16 @@ fn subsumes(wide: &Sel, narrow: &Sel) -> bool {
     })
 }
 
-/// 扩展一条复杂选择器；`None` 表示没有变化。
+/// Extend one complex selector; `None` means no change.
 fn extend_sel(sel: &Sel, table: &[(Compound, Extension)]) -> Option<Vec<Produced>> {
-    // 每个位置的可选方案：`Some(vec![...])` 表示这一位置被展开。
+    // Alternatives for each position: `Some(vec![...])` means this position is expanded.
     let mut options: Option<Vec<Vec<Produced>>> = None;
     for (i, part) in sel.parts.iter().enumerate() {
         let extended = extend_compound(&part.compound, table);
         match extended {
             None => {
-                // 未命中扩展的位置单独成段（dart 用只含该 component 的复杂选择器）。
+                // A position that matched no extension becomes a segment of its own (dart
+                // uses a complex selector containing only that component).
                 if let Some(options) = options.as_mut() {
                     options.push(vec![Produced::plain(Sel {
                         parts: vec![part.clone()],
@@ -322,19 +341,23 @@ fn extend_sel(sel: &Sel, table: &[(Compound, Extension)]) -> Option<Vec<Produced
                         vec![initial]
                     });
                 }
-                // 扩展者自己没有组合符时，继承被扩展位置的组合符
-                // （dart 的 `withAdditionalCombinators`）。
+                // When the extender itself has no combinator, it inherits the combinator of
+                // the extended position (dart's `withAdditionalCombinators`).
                 for alternative in &mut alternatives {
                     if alternative.sel.parts[0].combinator.is_none() {
                         alternative.sel.parts[0].combinator = part.combinator;
                     }
                 }
-                options.as_mut().expect("刚初始化").push(alternatives);
+                options
+                    .as_mut()
+                    .expect("just initialized")
+                    .push(alternatives);
             }
         }
     }
     let options = options?;
-    // 笛卡尔积 → 每个路径做一次织入；第一条路径是「全部原样」，排在前面。
+    // Cartesian product -> one weave per path; the first path is "everything as is" and
+    // comes first.
     let mut out = Vec::new();
     for path in paths(&options) {
         let origins = path
@@ -365,9 +388,10 @@ fn prefix_sel(parts: &[Part], line_break: bool) -> Sel {
     }
 }
 
-/// 扩展一个复合选择器；`None` 表示没有扩展命中。
+/// Extend one compound selector; `None` means no extension matched.
 fn extend_compound(compound: &Compound, table: &[(Compound, Extension)]) -> Option<Vec<Produced>> {
-    // 每个位置的可选方案：(来源扩展者, 选择器)。源码原样的方案来源是 `None`。
+    // Alternatives for each position: (source extender, selector). The source of a
+    // verbatim alternative is `None`.
     let mut options: Option<Vec<Vec<Alternative>>> = None;
     for (i, simple) in compound.simples.iter().enumerate() {
         let keep = single_compound_sel(Compound {
@@ -397,7 +421,7 @@ fn extend_compound(compound: &Compound, table: &[(Compound, Extension)]) -> Opti
                         vec![initial]
                     });
                 }
-                let position = options.as_mut().expect("刚初始化");
+                let position = options.as_mut().expect("just initialized");
                 let mut slot = vec![(None, keep)];
                 slot.extend(list.into_iter().map(|sel| (Some(sel.clone()), sel)));
                 position.push(slot);
@@ -407,8 +431,9 @@ fn extend_compound(compound: &Compound, table: &[(Compound, Extension)]) -> Opti
     let options = options?;
     let mut out = Vec::new();
     for path in paths_tagged(&options) {
-        // 原样保留的简单选择器按原复合选择器的顺序排在前面；被扩展掉的那个不保留
-        // （dart：`.column.a` + `.b` → `.a.b`）。
+        // Simple selectors kept as is come first in the order of the original compound
+        // selector; the one that was extended away is not kept
+        // (dart: `.column.a` + `.b` -> `.a.b`).
         let mut base: Vec<String> = Vec::new();
         let mut origins: Vec<Sel> = Vec::new();
         let mut extenders: Vec<Sel> = Vec::new();
@@ -445,7 +470,8 @@ fn extend_compound(compound: &Compound, table: &[(Compound, Extension)]) -> Opti
             }
             continue;
         }
-        // 复杂扩展者（`.a .b { @extend .c }`）：单段扩展者先并进末段，再织入。
+        // A complex extender (`.a .b { @extend .c }`): single-segment extenders are merged
+        // into the last segment first, then woven in.
         let mut simple = Compound { simples: base };
         if !extenders
             .iter()
@@ -465,16 +491,17 @@ fn extend_compound(compound: &Compound, table: &[(Compound, Extension)]) -> Opti
     Some(out)
 }
 
-/// 简单选择器在复合选择器里的位置类别（dart 的 `SimpleSelector.unify` 靠它定位）。
+/// Position class of a simple selector inside a compound selector (dart's
+/// `SimpleSelector.unify` uses it for placement).
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SimpleKind {
-    /// 类型 / 通配选择器：永远在最前。
+    /// Type / universal selector: always first.
     Type,
-    /// 伪元素（`::after`，以及 `:before` 这类单冒号别名）：永远在最后。
+    /// Pseudo-element (`::after`, and single-colon aliases such as `:before`): always last.
     PseudoElement,
-    /// 伪类（`:hover`、`:not(...)`）。
+    /// Pseudo-class (`:hover`, `:not(...)`).
     PseudoClass,
-    /// 类 / ID / 属性 / 占位符。
+    /// Class / ID / attribute / placeholder.
     Other,
 }
 
@@ -485,7 +512,8 @@ impl SimpleKind {
         }
         if let Some(rest) = simple.strip_prefix(':') {
             let name = rest.split('(').next().unwrap_or(rest).to_ascii_lowercase();
-            // dart 的 `_isFakePseudoElement`：单冒号写法在语义上仍是伪元素。
+            // dart's `_isFakePseudoElement`: the single-colon form is still semantically a
+            // pseudo-element.
             return if matches!(
                 name.as_str(),
                 "before" | "after" | "first-line" | "first-letter"
@@ -507,14 +535,18 @@ impl SimpleKind {
     }
 }
 
-/// 把一个简单选择器并进复合选择器；`false` 表示两者无法共存（dart 会丢弃该产物）。
+/// Merge one simple selector into a compound selector; `false` means the two cannot
+/// coexist (dart drops that product).
 ///
-/// 位置规则来自 dart 的 `SimpleSelector.unify` / `PseudoSelector.unify`：
-/// 类型选择器在最前，类/ID/属性插在第一个伪类之前，伪类插在第一个伪元素之前，
-/// 伪元素永远在最后；复合选择器只能有一个伪元素，冲突即无法合并。
+/// The placement rules come from dart's `SimpleSelector.unify` / `PseudoSelector.unify`:
+/// type selectors first, class/ID/attribute inserted before the first pseudo-class,
+/// pseudo-classes inserted before the first pseudo-element, and pseudo-elements always
+/// last; a compound selector may hold only one pseudo-element, so a conflict cannot be
+/// merged.
 fn unify_simple(merged: &mut Vec<String>, simple: &str) -> bool {
     match SimpleKind::of(simple) {
-        // 通配选择器不增加约束：dart 在有其它简单选择器时直接丢掉它。
+        // A universal selector adds no constraint: dart simply drops it when other simple
+        // selectors are present.
         SimpleKind::Type if simple == "*" => {
             if merged.is_empty() {
                 merged.push(simple.to_string());
@@ -564,20 +596,25 @@ fn unify_simple(merged: &mut Vec<String>, simple: &str) -> bool {
     }
 }
 
-/// 把 `extender` 复合选择器并进 `merged`（dart 的 `unifyCompound(merged, extender)`）。
+/// Merge the `extender` compound selector into `merged` (dart's
+/// `unifyCompound(merged, extender)`).
 ///
-/// `merged` 是被扩展选择器去掉目标后剩下的简单选择器，`extender` 是扩展者：
-/// `.column:hover` 被 `.z` 扩展 → `.z:hover`（`.column.a:hover` + `.z` → `.a.z:hover`）。
-/// 扩展者自己写下的伪元素/伪类相对顺序不会被重排（`::after:hover` 仍是 `::after:hover`）。
+/// `merged` is what remains of the extended selector after removing the target, and
+/// `extender` is the extender: `.column:hover` extended by `.z` -> `.z:hover`
+/// (`.column.a:hover` + `.z` -> `.a.z:hover`). The relative order of pseudo-elements /
+/// pseudo-classes written by the extender itself is not rearranged (`::after:hover`
+/// stays `::after:hover`).
 fn merge_compound(merged: &mut Compound, extender: &Compound) -> bool {
-    // dart 的 `unifyComplex` 只有一个参与选择器时原样返回：被扩展的复合选择器整个
-    // 消失（`%p`）时，扩展者保持作者写的顺序，不做任何规范化。
+    // dart's `unifyComplex` returns as is when only one selector takes part: when the
+    // extended compound selector disappears entirely (`%p`), the extender keeps the
+    // author's order without any normalization.
     if merged.simples.is_empty() {
         merged.simples.clone_from(&extender.simples);
         return true;
     }
     let mut pseudo_element_found = false;
-    // 扩展者伪元素之后的伪类按原顺序追加在整条复合选择器末尾（dart 的 `pseudoResult`）。
+    // Pseudo-classes after the extender's pseudo-element are appended in their original
+    // order at the end of the whole compound selector (dart's `pseudoResult`).
     let mut pseudo: Vec<String> = Vec::new();
     for simple in &extender.simples {
         let kind = SimpleKind::of(simple);
@@ -607,7 +644,7 @@ fn single_compound_sel(compound: Compound) -> Sel {
     }
 }
 
-/// 命中 `simple` 的所有扩展者（按登记顺序）。
+/// All extenders that match `simple` (in registration order).
 fn extenders_for(simple: &str, table: &[(Compound, Extension)]) -> Option<Vec<Sel>> {
     let mut hit = false;
     let mut out = Vec::new();
@@ -621,7 +658,8 @@ fn extenders_for(simple: &str, table: &[(Compound, Extension)]) -> Option<Vec<Se
     if hit { Some(out) } else { None }
 }
 
-/// 笛卡尔积：每个位置取一个方案，按字典序遍历（dart 的 `paths`）。
+/// Cartesian product: take one alternative per position and traverse in lexicographic
+/// order (dart's `paths`).
 fn paths(options: &[Vec<Produced>]) -> Vec<Vec<Produced>> {
     let mut acc: Vec<Vec<Produced>> = vec![Vec::new()];
     for position in options {
@@ -638,10 +676,12 @@ fn paths(options: &[Vec<Produced>]) -> Vec<Vec<Produced>> {
     acc
 }
 
-/// 扩展位置的可选方案：`None` 表示源码原样的简单选择器。
+/// Alternatives of an extension position: `None` means the simple selector as written in
+/// the source.
 type Alternative = (Option<Sel>, Sel);
 
-/// 同上，但每个方案带上「来源扩展者」（源码原样的方案是 `None`）。
+/// Same as above, but every alternative carries its "source extender" (`None` for a
+/// verbatim alternative).
 fn paths_tagged(options: &[Vec<Alternative>]) -> Vec<Vec<Alternative>> {
     let mut acc: Vec<Vec<Alternative>> = vec![Vec::new()];
     for position in options {
@@ -658,11 +698,13 @@ fn paths_tagged(options: &[Vec<Alternative>]) -> Vec<Vec<Alternative>> {
     acc
 }
 
-/// 把一条路径（若干扩展者）合并成一条复杂选择器。
+/// Merge one path (a number of extenders) into one complex selector.
 ///
-/// 单段扩展者（原选择器与其等价物）合并成末段的复合选择器；多段扩展者按
-/// 「公共前缀去重后拼接」织入，与 dart 的 `weave` 在 bootstrap 这类
-/// 「同前缀、末段不同」的选择器上等价。
+/// Single-segment extenders (the original selector and its equivalents) are merged into
+/// the compound selector of the last segment; multi-segment extenders are woven in by
+/// "deduplicating the common prefix and then concatenating", which is equivalent to
+/// dart's `weave` for bootstrap-style selectors that share a prefix and differ in the
+/// last segment.
 fn unify_extenders(originals: &Compound, extenders: &[Sel]) -> Vec<Sel> {
     let complexes: Vec<&Sel> = extenders
         .iter()
@@ -671,8 +713,9 @@ fn unify_extenders(originals: &Compound, extenders: &[Sel]) -> Vec<Sel> {
     let mut out = Vec::new();
     for base in &complexes {
         let mut merged = (*base).clone();
-        let last = merged.parts.last_mut().expect("多段");
-        // dart 的 `unifyComplex`：先把各扩展者的末段并进原位复合选择器，再织入父级。
+        let last = merged.parts.last_mut().expect("multiple segments");
+        // dart's `unifyComplex`: first merge the last segment of each extender into the
+        // compound selector in place, then weave in the parents.
         let mut compound = originals.clone();
         if !merge_compound(&mut compound, &last.compound) {
             continue;
@@ -683,7 +726,8 @@ fn unify_extenders(originals: &Compound, extenders: &[Sel]) -> Vec<Sel> {
     out
 }
 
-/// 织入多条复杂选择器（`weave`）：公共前缀合并去重后依次拼接。
+/// Weave several complex selectors (`weave`): merge and deduplicate the common prefix,
+/// then concatenate in order.
 fn weave(path: &[Sel], line_break: bool) -> Vec<Sel> {
     let mut iter = path.iter();
     let Some(first) = iter.next() else {
@@ -693,8 +737,9 @@ fn weave(path: &[Sel], line_break: bool) -> Vec<Sel> {
     for complex in iter {
         let mut next = Vec::new();
         for prefix in &prefixes {
-            // 单段扩展者直接并到前缀末尾（dart 的 `target` 追加）：两个复合选择器
-            // 并列即隐式后代组合符，`weave` 不做前缀去重。
+            // A single-segment extender is merged onto the end of the prefix (appending
+            // dart's `target`): two juxtaposed compound selectors are an implicit descendant
+            // combinator, and `weave` does no prefix deduplication.
             if complex.parts.len() == 1 {
                 let mut merged = prefix.clone();
                 merged.line_break |= complex.line_break | line_break;
@@ -702,7 +747,8 @@ fn weave(path: &[Sel], line_break: bool) -> Vec<Sel> {
                 next.push(merged);
                 continue;
             }
-            // 末段与下一段首段相同 → 合并（`.navbar` + `.navbar > .x`）。
+            // The last segment equals the first segment of the next part -> merge
+            // (`.navbar` + `.navbar > .x`).
             if complex.parts.len() > 1 && prefix.parts.last() == complex.parts.first() {
                 let mut merged = prefix.clone();
                 merged.line_break |= complex.line_break;
@@ -710,7 +756,7 @@ fn weave(path: &[Sel], line_break: bool) -> Vec<Sel> {
                 next.push(merged);
                 continue;
             }
-            // 公共前缀（相同段）逐段吃掉。
+            // The common prefix (equal segments) is consumed segment by segment.
             let shared = prefix
                 .parts
                 .iter()
@@ -724,9 +770,11 @@ fn weave(path: &[Sel], line_break: bool) -> Vec<Sel> {
             merged.parts.extend(prefix.parts[shared..].iter().cloned());
             merged.parts.extend(complex.parts[shared..].iter().cloned());
             next.push(merged);
-            // dart 的 `_weaveParents` 在两侧都还有未消费的父级时还会产出另一种交错：
-            // `.D (.A .B)` → `.D .A .B, .A .D .B`。末段是目标，始终留在最后；
-            // 带组合符的段不参与交错（与 dart 的 `_mergeTrailingCombinators` 保持一致）。
+            // dart's `_weaveParents` also produces another interleaving when both sides
+            // still have unconsumed parents: `.D (.A .B)` -> `.D .A .B, .A .D .B`. The last
+            // segment is the target and always stays last; segments with a combinator do not
+            // take part in the interleaving (consistent with dart's
+            // `_mergeTrailingCombinators`).
             let target = complex.parts.len() - 1;
             if shared < target
                 && shared < prefix.parts.len()
@@ -759,11 +807,12 @@ fn weave(path: &[Sel], line_break: bool) -> Vec<Sel> {
     prefixes
 }
 
-/// dart 的 `_trim`：
-/// - 重复选择器保留先出现的那条；
-/// - 扩展产物被**同一来源**的、更宽松的选择器覆盖时丢掉（`.columns` 覆盖
-///   `.columns:last-child`、`.b` 覆盖 `.b:hover`）；
-/// - 组合符更严格的选择器被更宽松的覆盖（`.navbar > .x` 之于 `.navbar .x`）。
+/// dart's `_trim`:
+/// - for duplicate selectors, keep the one that appears first;
+/// - an extension product is dropped when a more lenient selector from the **same
+///   source** covers it (`.columns` covers `.columns:last-child`, `.b` covers `.b:hover`);
+/// - a selector with a stricter combinator is covered by a more lenient one
+///   (`.navbar > .x` vs `.navbar .x`).
 fn trim(produced: Vec<Produced>) -> Vec<Sel> {
     let mut drop_early = vec![false; produced.len()];
     for i in 0..produced.len() {
@@ -791,8 +840,8 @@ fn trim(produced: Vec<Produced>) -> Vec<Sel> {
     out.into_iter().map(|item| item.sel.clone()).collect()
 }
 
-/// `wide` 是否覆盖 `narrow`：复合选择器完全一致，而 `narrow` 的组合符更严格
-/// （`>`/`+`/`~` 相对后代）或完全相同。
+/// Whether `wide` covers `narrow`: the compound selectors are identical and `narrow`'s
+/// combinator is stricter (`>`/`+`/`~` relative to descendant) or exactly the same.
 fn covers(wide: &Sel, narrow: &Sel) -> bool {
     wide.parts.len() == narrow.parts.len()
         && wide.parts.iter().zip(&narrow.parts).all(|(a, b)| {
@@ -800,7 +849,7 @@ fn covers(wide: &Sel, narrow: &Sel) -> bool {
         })
 }
 
-/// 把选择器文本解析成 `Sel`（组合符 + 复合选择器）。
+/// Parse selector text into `Sel` (combinator + compound selector).
 pub(crate) fn parse_sel(text: &str, line_break: bool) -> Option<Sel> {
     let bytes = text.as_bytes();
     let mut parts: Vec<Part> = Vec::new();
@@ -996,7 +1045,8 @@ fn consume_ident(bytes: &[u8], mut i: usize) -> usize {
     i
 }
 
-/// 把 `@extend` 的目标文本解析成复合选择器（dart 不允许扩展复杂选择器）。
+/// Parse the target text of `@extend` into a compound selector (dart does not allow
+/// extending complex selectors).
 pub(crate) fn target_compound(text: &str) -> Option<Compound> {
     let sel = parse_sel(text, false)?;
     match sel.parts.as_slice() {
@@ -1005,7 +1055,8 @@ pub(crate) fn target_compound(text: &str) -> Option<Compound> {
     }
 }
 
-/// 回写：按编号把最终选择器文本写进规则，并丢掉只剩占位符的规则。
+/// Write back: put the final selector text into the rules by id, and drop rules that are
+/// left with only placeholders.
 pub(crate) fn apply(items: &mut Vec<Item>, lists: &[Vec<Sel>], dirty: &[bool]) {
     for item in items.iter_mut() {
         match item {
@@ -1016,7 +1067,8 @@ pub(crate) fn apply(items: &mut Vec<Item>, lists: &[Vec<Sel>], dirty: &[bool]) {
                             sels.iter()
                                 .any(|sel| sel.parts.iter().any(|p| p.compound.has_placeholder()))
                         };
-                        // 没被扩展碰过的规则也要滤掉占位符（`%p {}` 不产出 CSS）。
+                        // Rules untouched by extension still filter out placeholders
+                        // (`%p {}` emits no CSS).
                         if dirty.get(id).copied() == Some(true) || has_placeholder(selectors) {
                             let kept = selectors
                                 .iter()
@@ -1024,8 +1076,8 @@ pub(crate) fn apply(items: &mut Vec<Item>, lists: &[Vec<Sel>], dirty: &[bool]) {
                                     !sel.parts.iter().any(|p| p.compound.has_placeholder())
                                 })
                                 .collect::<Vec<_>>();
-                            // 回写后仍沿用原选择器列表的锚点（dart 的 `CssValue<SelectorList>`
-                            // 换值不换 span）。
+                            // After writing back, keep the anchor of the original selector list
+                            // (dart's `CssValue<SelectorList>` changes the value, not the span).
                             let span = rule
                                 .selector
                                 .first()
@@ -1044,7 +1096,8 @@ pub(crate) fn apply(items: &mut Vec<Item>, lists: &[Vec<Sel>], dirty: &[bool]) {
             Item::Keyframe(_) | Item::Comment(_) | Item::Raw(_) => {}
         }
     }
-    // 扩展后可能只剩一条空规则：整条 at-rule 也一起消失（dart 不会输出 `@media x {}`）。
+    // Only an empty rule may remain after extension: the whole at-rule disappears with it
+    // (dart does not output `@media x {}`).
     items.retain(|item| {
         !matches!(item, Item::AtRule(at)
             if matches!(&at.body, Some(Body::Rules(rules)) if rules.is_empty()))

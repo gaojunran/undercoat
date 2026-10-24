@@ -1,41 +1,57 @@
-//! `.sass` 缩进语法 → 等义 SCSS 文本。
+//! The `.sass` indented syntax -> equivalent SCSS text.
 //!
-//! 为什么在装载期改写文本：`@import` 是**文本级**内联（见 `imports.rs`），整条流水线
-//! 共用一段合并文本、一次 oxc 解析（`Syntax::Scss`）。把缩进语法在装载时折成 SCSS，
-//! 后续求值/序列化/sourcemap 全部零改动，`.scss` 与 `.sass` 互相 `@import` / `@use`
-//! （dart 1.93.2 实测允许混用）也天然成立。
+//! Why the text is rewritten at load time: `@import` is **text-level** inlining (see
+//! `imports.rs`), and the whole pipeline shares one merged text and one oxc parse
+//! (`Syntax::Scss`). Folding the indented syntax into SCSS at load time leaves
+//! evaluation/serialization/sourcemap untouched, and `.scss` and `.sass` importing or
+//! `@use`-ing each other (observed to be allowed in dart 1.93.2) works naturally.
 //!
-//! 改写只做「结构插入」：块首行尾插 `{`、语句行尾插 `;`、块结束时在最后一行的可插入
-//! 位置插 `}`（`//` 行尾注释之前），并把 `=m` / `+m` 归一成 `@mixin m` / `@include m`。
-//! **不新增、不删除行**，所以行号与原文一一对应（`imports.rs` 的报错定位与
-//! `compiler-style` 的 `align_to_disk` 都能直接沿用），原有字符的列位置也不动。
+//! The rewrite only does "structural insertion": insert `{` at the end of a block-head
+//! line, `;` at the end of a statement line, and `}` at an insertable position of the
+//! last line when a block closes (before a trailing `//` comment), and normalize `=m` /
+//! `+m` into `@mixin m` / `@include m`.
+//! It **adds and removes no lines**, so line numbers correspond one-to-one with the
+//! source (both the error locations in `imports.rs` and `align_to_disk` of
+//! `compiler-style` can be reused directly), and the column positions of existing
+//! characters do not move.
 //!
-//! 结构判定逐条对齐 dart-sass 1.93.2 实测：
-//! - 缩进更深即子块，缩进回退即关块（可一次关多级）。
-//! - 声明与选择器按「首个顶层冒号之后是否紧跟空白」区分：`color: red` 是声明，
-//!   `a:hover` / `tr:not(.x)` / `color:red` 都是选择器（老式 `:color red` 同样按选择器，
-//!   与 1.93.2 一致，不实现成属性）。
-//! - 续行：未配对的 `(`/`[`/`#{`、行尾运算符（`1 +`）、指令与声明行尾的
-//!   `and`/`or`/`not`/`in`/`from`/`through`/`to`；逗号续行只属于选择器列表（且下一非空行
-//!   不左移）；续行必须比语句首行更深。
-//! - 行首 `//` 注释吞掉更深的续行（dart 的 comment continuation），这里把这些行前缀
-//!   `//` 保留成注释，免得它们变成真正的语句。
-//! - `//` 只在括号外才是行注释（`url(http://x)` 不是）；`/* */` 未在本行闭合时，
-//!   注释体由缩进界定，收尾在最后一行补 `*/`。
-//! - 没有子块的语句给空块或分号（`{}` 由序列化层丢弃，与 dart 一致）；
-//!   `@import ../a/b.sass` 这种不带引号的 URL 补引号后交给统一解析。
+//! Structural decisions follow dart-sass 1.93.2 as observed, item by item:
+//! - Deeper indentation starts a child block; dedenting closes blocks (possibly several
+//!   levels at once).
+//! - Declarations and selectors are told apart by "whether whitespace immediately
+//!   follows the first top-level colon": `color: red` is a declaration, while `a:hover` /
+//!   `tr:not(.x)` / `color:red` are all selectors (the old `:color red` form is a
+//!   selector as well, consistent with 1.93.2; it is not implemented as a property).
+//! - Continuation lines: an unclosed `(`/`[`/`#{`, a trailing operator (`1 +`), and a
+//!   trailing `and`/`or`/`not`/`in`/`from`/`through`/`to` of a directive or declaration;
+//!   comma continuation belongs to selector lists only (and the next non-empty line must
+//!   not dedent); a continuation must be deeper than the statement's first line.
+//! - A leading `//` comment swallows deeper continuation lines (dart's comment
+//!   continuation); here those lines keep the `//` prefix as a comment so that they do
+//!   not turn into real statements.
+//! - `//` is a line comment only outside parentheses (`url(http://x)` is not one); when a
+//!   `/* */` does not close on the same line, the comment body is delimited by
+//!   indentation and `*/` is appended on the last line.
+//! - A statement without a child block gets an empty block or a semicolon (`{}` is
+//!   dropped by the serialization layer, consistent with dart); an unquoted URL such as
+//!   `@import ../a/b.sass` gets quotes and is then handed to the unified parser.
 //!
-//! `oxc-css-parser` 的 `Syntax::Sass` 与 dart 有两处行为差异（`tests/sass_conversion_ast.rs`
-//! 的 `oxc_*` 探针逐条钉住）：它只认同缩进更深的选择器续行；块内的 `//` 注释行会被它
-//! 当成块结束。本模块按 dart 语义实现，AST 门禁对这些差异做折行/去注释豁免。
+//! `oxc-css-parser`'s `Syntax::Sass` differs from dart in two behaviors (pinned item by
+//! item by the `oxc_*` probes in `tests/sass_conversion_ast.rs`): it only accepts
+//! selector continuations with strictly deeper indentation, and it treats a `//` comment
+//! line inside a block as the end of the block. This module follows dart's semantics, and
+//! the AST gate exempts these differences by folding lines / stripping comments.
 //!
-//! 已知偏差（都不影响语义）：
-//! - 行号与插入点之前的列号精确；`=m` / `+m` 行会被改写成长度不同的 `@mixin ` /
-//!   `@include `，该行上的报错列号偏移 6 / 8（行号仍精确）。
-//! - 跨行 `/* */` 的续行保留原缩进，dart 会重排成 ` * …`（注释，语义等价）。
+//! Known deviations (none of them affects semantics):
+//! - Line numbers and columns before the insertion point are exact; a `=m` / `+m` line is
+//!   rewritten into `@mixin ` / `@include ` of a different length, so error columns on
+//!   that line are off by 6 / 8 (line numbers are still exact).
+//! - Continuation lines of a multi-line `/* */` keep their original indentation, while
+//!   dart re-indents them as ` * …` (a comment, so semantically equivalent).
 
-/// 一条输出行。`code` 是「可插入位置」：行尾 `//` 注释 / 未闭合 `/*` 之前，
-/// 终止符与关块都插在这里（插在注释之后会被注释吃掉）。
+/// One output line. `code` is the "insertable position": before a trailing `//` comment
+/// / unclosed `/*`, which is where terminators and block closings are inserted (anything
+/// inserted after the comment would be eaten by it).
 struct Line {
     text: String,
     code: usize,
@@ -57,7 +73,7 @@ impl Line {
     }
 }
 
-/// 语句类型：决定逗号续行与 `=`/`+` 归一化。
+/// Statement kind: decides comma continuation and `=`/`+` normalization.
 #[derive(Clone, Copy, PartialEq)]
 enum Kind {
     AtRule,
@@ -68,25 +84,27 @@ enum Kind {
     Comment,
 }
 
-/// 一个未结束的语句。
+/// An unfinished statement.
 struct Pending {
     indent: usize,
     kind: Kind,
 }
 
-/// 一条跨行 `/*` 注释：块首缩进决定它的结束，`last` 是当前最后一行（收尾插 `*/`）。
+/// A multi-line `/*` comment: the indentation of its first line decides where it ends;
+/// `last` is the current last line (where the closing `*/` goes).
 struct OpenComment {
     indent: usize,
     last: usize,
 }
 
-/// 一个打开的块。
+/// An open block.
 struct Block {
     indent: usize,
     line: usize,
 }
 
-/// 跨行保留的扫描状态（续行里的字符串 / 括号 / 块注释）。
+/// Scan state carried across lines (strings / parentheses / block comments inside
+/// continuation lines).
 #[derive(Default)]
 struct Scan {
     quote: Option<u8>,
@@ -95,13 +113,14 @@ struct Scan {
 }
 
 struct ScanOut {
-    /// 终止符插入点。
+    /// Terminator insertion point.
     code: usize,
-    /// 语句可以在此行结束（没有未闭合的字符串 / 括号 / 块注释）。
+    /// The statement may end on this line (no unclosed string / parentheses / block
+    /// comment).
     complete: bool,
 }
 
-/// 把一段 `.sass` 源文本改写成等义 SCSS。
+/// Rewrite a piece of `.sass` source text into equivalent SCSS.
 #[doc(hidden)]
 pub fn to_scss(src: &str) -> String {
     let lines: Vec<&str> = src.split('\n').collect();
@@ -110,7 +129,8 @@ pub fn to_scss(src: &str) -> String {
         .iter()
         .map(|l| l.len() - l.trim_start_matches([' ', '\t']).len())
         .collect();
-    // next[i]：i 之后第一个非空行的缩进（判定「子块」与逗号续行）。
+    // next[i]: indentation of the first non-empty line after i (used to decide "child
+    // block" and comma continuation).
     let mut next: Vec<Option<usize>> = vec![None; lines.len()];
     let mut upcoming = None;
     for i in (0..lines.len()).rev() {
@@ -125,7 +145,8 @@ pub fn to_scss(src: &str) -> String {
     let mut last_appendable: Option<usize> = None;
     let mut pending: Option<Pending> = None;
     let mut line_comment: Option<usize> = None;
-    // 语句级 `/*` 注释：未在本行闭合时，body 由缩进界定（dart 的缩进语法行为）。
+    // A statement-level `/*` comment: when it does not close on this line, the body is
+    // delimited by indentation (dart's indented-syntax behavior).
     let mut block_comment: Option<OpenComment> = None;
     let mut scan = Scan::default();
 
@@ -133,7 +154,8 @@ pub fn to_scss(src: &str) -> String {
         let raw = lines[i];
         let indent = indents[i];
 
-        // 缩进回退即结束未闭合的 `/*` 注释（dart：`/*` 的 body 是缩进块）。
+        // Dedenting ends an unclosed `/*` comment (dart: the body of `/*` is an indented
+        // block).
         if block_comment
             .as_ref()
             .is_some_and(|c| !blank[i] && indent <= c.indent)
@@ -147,7 +169,7 @@ pub fn to_scss(src: &str) -> String {
             scan.in_block_comment = false;
         }
 
-        // 行首 `//` 注释吞掉的更深续行：保持为注释。
+        // The deeper continuation lines swallowed by a leading `//` comment stay comments.
         if let Some(base) = line_comment {
             if !blank[i] && indent <= base {
                 line_comment = None;
@@ -157,7 +179,8 @@ pub fn to_scss(src: &str) -> String {
                 } else {
                     (format!("{}// {}", &raw[..indent], &raw[indent..]), indent)
                 };
-                // 注释行不可追加：`}` 插在 `//` 之前会被注释吃掉，插在之后又没意义。
+                // Nothing can be appended to a comment line: a `}` inserted before `//`
+                // would be eaten by the comment, and inserting it after is meaningless.
                 let mut line = Line::new(text, code);
                 line.appendable = false;
                 out.push(line);
@@ -171,7 +194,8 @@ pub fn to_scss(src: &str) -> String {
             continue;
         }
 
-        // 行首就落在块注释里：整行不可追加；语句（若有）在注释闭合后继续。
+        // The line starts inside a block comment: nothing can be appended to the whole
+        // line; the statement (if any) continues after the comment closes.
         if scan.in_block_comment {
             let done = scan_line(raw, &mut scan);
             out.push(Line {
@@ -197,7 +221,8 @@ pub fn to_scss(src: &str) -> String {
         if pending.is_none() {
             let kind = kind_of(&raw[indent..]);
             if kind == Kind::Comment {
-                // 语句级注释：不产生语句，也不参与块结构。
+                // A statement-level comment: produces no statement and takes no part in the
+                // block structure.
                 let done = scan_line(raw, &mut scan);
                 out.push(Line {
                     text: raw.to_string(),
@@ -214,7 +239,8 @@ pub fn to_scss(src: &str) -> String {
                 }
                 continue;
             }
-            // 关块：缩进不深于块首即退出（可一次退出多级）。
+            // Close blocks: exit once the indentation is not deeper than the block head
+            // (possibly several levels at once).
             while blocks.last().is_some_and(|b| b.indent >= indent) {
                 close_block(&mut out, &mut blocks, &mut last_appendable);
             }
@@ -275,11 +301,15 @@ pub fn to_scss(src: &str) -> String {
     text
 }
 
-/// 把选择器列表的续行折成同一行（只给 AST 门禁当 oracle 用）。
+/// Fold continuation lines of a selector list into one line (only used as the oracle of
+/// the AST gate).
 ///
-/// oxc 的 `Syntax::Sass` 只把**更深缩进**的下一行当成语句续行（dart 同缩进也续），
-/// 所以「转换器 vs oxc Sass」的 AST 对拍需要先把续行折成一行，才能比较同一份语义。
-/// 只折 `kind == Selector` 且行尾是顶层逗号的行，声明/指令的续行不受影响。
+/// oxc's `Syntax::Sass` only treats the next line as a statement continuation when it is
+/// **indented deeper** (dart also continues at the same indentation), so the
+/// "converter vs oxc Sass" AST conformance run must first fold continuation lines into
+/// one line before comparing the same semantics. Only lines with `kind == Selector` that
+/// end in a top-level comma are folded; continuations of declarations/directives are
+/// unaffected.
 #[doc(hidden)]
 pub fn fold_selector_continuations(src: &str) -> String {
     let lines: Vec<&str> = src.split('\n').collect();
@@ -302,7 +332,8 @@ pub fn fold_selector_continuations(src: &str) -> String {
             i += 1;
             continue;
         }
-        // 续行必须**并进同一行**：留空行会让 oxc 认为语句已结束。
+        // The continuation must be **merged into the same line**: leaving an empty line
+        // would make oxc consider the statement finished.
         let mut joined = raw.trim_end().to_string();
         i += 1;
         while let Some(j) = (i..lines.len()).find(|&j| !lines[j].trim().is_empty()) {
@@ -319,17 +350,21 @@ pub fn fold_selector_continuations(src: &str) -> String {
     out.join("\n")
 }
 
-/// 转换后 SCSS 解析失败：把错误映射回 `.sass` 源位置与 dart 文案。
+/// SCSS parse failure after conversion: map the error back to the `.sass` source position
+/// and dart's message.
 ///
-/// 能精确复现的形态优先（dart 1.93.2 实测）：
-/// - `{`：`Expected newline.` @ `{`
-/// - 语句行尾的顶层逗号（非选择器列表）：dart 的错误位置**就是逗号之后**
-///   - 声明 + 更深续行 / 指令 → `Expected identifier.`
-///   - 声明 + 不更深 → `expected selector.`
-///   - 变量声明（`$x: 1,`）→ `Nothing may be indented beneath a variable declaration.`
-///     @ 下一条更深行的内容起点
+/// Shapes that can be reproduced exactly take priority (observed with dart 1.93.2):
+/// - `{`: `Expected newline.` @ `{`
+/// - a top-level comma at the end of a statement line (not a selector list): dart's error
+///   position is **right after the comma**
+///   - declaration + deeper continuation line / directive -> `Expected identifier.`
+///   - declaration + not deeper -> `expected selector.`
+///   - variable declaration (`$x: 1,`) -> `Nothing may be indented beneath a variable
+///     declaration.`
+///     @ the content start of the next deeper line
 ///
-/// 其余情况只保证**行号**与原文一致（改写不增删行），列号裁到该行代码末尾。
+/// Otherwise only the **line number** is guaranteed to match the source (the rewrite adds
+/// and removes no lines), and the column is clamped to the end of that line's code.
 pub(crate) fn parse_error(
     src: &str,
     converted: &str,
@@ -347,11 +382,12 @@ pub(crate) fn parse_error(
     }
     (
         source_line_end(src, line, col),
-        format!("SCSS 解析失败: {kind}"),
+        format!("SCSS parse failure: {kind}"),
     )
 }
 
-/// 0-based 行号 `line` 上的第 `col` 列（列超出该行代码长度时裁到代码末尾）。
+/// Column `col` on the 0-based line `line` (clamped to the end of the code when it
+/// overflows the line).
 fn source_line_end(src: &str, line: usize, col: usize) -> usize {
     let mut start = 0;
     for (i, raw) in src.split('\n').enumerate() {
@@ -363,7 +399,8 @@ fn source_line_end(src: &str, line: usize, col: usize) -> usize {
     src.len()
 }
 
-/// 语句行尾的顶层逗号（dart 的报错位置就是它）。返回 `(偏移, dart 文案)`。
+/// A top-level comma at the end of a statement line (that is where dart reports).
+/// Returns `(offset, dart message)`.
 fn trailing_comma_error(src: &str, fail_line: usize) -> Option<(usize, String)> {
     let lines: Vec<&str> = src.split('\n').collect();
     let indent_of = |i: usize| lines[i].len() - lines[i].trim_start_matches([' ', '\t']).len();
@@ -388,7 +425,8 @@ fn trailing_comma_error(src: &str, fail_line: usize) -> Option<(usize, String)> 
         {
             continue;
         }
-        // dart 的位置是逗号**之后**（缺失的标识符应在处），所以不加 -1。
+        // dart's position is **after** the comma (where the missing identifier should be),
+        // so no -1 is applied.
         let comma = start + code.trim_end().len();
         let deeper = next_line(i).is_some_and(|j| indent_of(j) > indent_of(i));
         let (at, message) = if trimmed.starts_with('$') {
@@ -412,7 +450,8 @@ fn trailing_comma_error(src: &str, fail_line: usize) -> Option<(usize, String)> 
     fallback
 }
 
-/// 第一个不属于 `#{}` / 字符串 / 注释的 `{`（`.sass` 里写 `{}` 就是硬错误）。
+/// The first `{` that is not part of `#{}` / a string / a comment (writing `{}` in
+/// `.sass` is a hard error).
 pub(crate) fn stray_brace(text: &str) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut i = 0;
@@ -462,8 +501,9 @@ pub(crate) fn stray_brace(text: &str) -> Option<usize> {
     None
 }
 
-/// 缩进语法允许 `@import ../a/b.sass` 这种不带引号的 URL（dart 1.93.2 实测；SCSS 里
-/// 同写法会报 `Expected string`），这里补上引号交给统一的 `@import` 解析。
+/// The indented syntax allows an unquoted URL such as `@import ../a/b.sass` (observed
+/// with dart 1.93.2; the same form in SCSS reports `Expected string`); here quotes are
+/// added and it is handed to the unified `@import` parsing.
 fn quote_import(line: &mut Line, indent: usize) {
     let body = &line.text[indent..line.code];
     let Some(rest) = body.strip_prefix("@import") else {
@@ -492,7 +532,7 @@ fn quote_import(line: &mut Line, indent: usize) {
     line.code = indent + "@import".len() + 1 + quoted.len();
 }
 
-/// 语句结束：缩进更深即 `{`（开块），否则 `;`。
+/// End of a statement: `{` when the indentation is deeper (opens a block), otherwise `;`.
 fn finish_statement(
     line: usize,
     out: &mut [Line],
@@ -509,15 +549,17 @@ fn finish_statement(
         });
         return;
     }
-    // 没有子块的语句：选择器 / 需要块的指令给 `{}`（dart 对这类空块不产出任何 CSS），
-    // 其余（`@import` / `@use` / `@return` 等）给 `;`。
+    // A statement without a child block: selectors and directives that need a block get
+    // `{}` (dart emits no CSS for such empty blocks), the rest (`@import` / `@use` /
+    // `@return` etc.) get `;`.
     let head = out[line].text.get(..out[line].code).unwrap_or_default();
     let needs_block =
         matches!(p.kind, Kind::Selector | Kind::MixinDef) || needs_block_at_rule(head);
     out[line].push_code(if needs_block { "{}" } else { ";" });
 }
 
-/// 指令是否以「块」为载体（dart：无子块时整条被丢弃，等价于空块）。
+/// Whether the directive is carried by a "block" (dart: without a child block the whole
+/// directive is dropped, which is equivalent to an empty block).
 fn needs_block_at_rule(head: &str) -> bool {
     let Some(name) = head.trim_start().strip_prefix('@') else {
         return false;
@@ -560,10 +602,11 @@ fn close_block(out: &mut [Line], blocks: &mut Vec<Block>, last_appendable: &mut 
     *last_appendable = Some(target);
 }
 
-/// 语句是否还要延续到下一行。
+/// Whether the statement continues onto the next line.
 ///
-/// 逗号只在选择器列表里续行（dart：`&:focus,` 后同缩进/更深都续，左移则不续）；
-/// 行尾运算符（`1 +`）与 `and` / `in` / `from` 之类关键字也续行。
+/// A comma continues only inside a selector list (dart: after `&:focus,` both the same
+/// and a deeper indentation continue, dedenting does not); a trailing operator (`1 +`)
+/// and keywords such as `and` / `in` / `from` continue as well.
 fn continues(code: &str, kind: Kind, next_indent: Option<usize>, stmt_indent: usize) -> bool {
     let code = code.trim_end();
     let Some(&last) = code.as_bytes().last() else {
@@ -571,32 +614,39 @@ fn continues(code: &str, kind: Kind, next_indent: Option<usize>, stmt_indent: us
     };
     if kind == Kind::Selector {
         return match last {
-            // 逗号续行：下一非空行不左移（dart：左移即逗号是结尾）。
+            // Comma continuation: the next non-empty line does not dedent (dart: dedenting
+            // means the comma is the end).
             b',' => next_indent.is_some_and(|n| n >= stmt_indent),
-            // 组合器独占一行（`>` 后接更深的下一行）才续行；行尾组合器（`.a >`）是
-            // **完整语句**（dart 实测：`.a >` 的后续行按嵌套处理，不拼选择器）。
+            // Only a combinator on a line of its own (a `>` followed by a deeper next line)
+            // continues; a trailing combinator (`.a >`) is a **complete statement**
+            // (observed with dart: lines after `.a >` are treated as nested, not joined into
+            // the selector).
             b'>' | b'+' | b'~' => {
                 code.trim().len() == 1 && next_indent.is_some_and(|n| n >= stmt_indent)
             }
             _ => false,
         };
     }
-    // 其余续行必须比语句首行更深（dart 用缩进判定续行；`@use "x" as *` 这类
-    // 完整语句后面跟一个左移的下一行时不能当成续行）。
+    // Any other continuation must be deeper than the first line of the statement (dart
+    // decides continuation by indentation; after a complete statement such as
+    // `@use "x" as *`, a dedented next line must not count as a continuation).
     if !next_indent.is_some_and(|n| n > stmt_indent) {
         return false;
     }
     match last {
-        // 算术 / 比较运算符（`%` 不算：行尾 `96%` 是完整值，不是取模）。
+        // Arithmetic / comparison operators (`%` does not count: a trailing `96%` is a
+        // complete value, not a modulo).
         b'+' | b'*' | b'/' | b'=' | b'>' | b'<' => true,
-        // `-` 只在两侧都是空白时当运算符（`margin: -1` 不会误续行）。
+        // `-` only counts as an operator when whitespace is on both sides (`margin: -1`
+        // does not continue by mistake).
         b'-' => code
             .as_bytes()
             .get(code.len().wrapping_sub(2))
             .is_some_and(|c| c.is_ascii_whitespace()),
         _ => {
-            // 关键字续行属于指令与声明（`@for $i from 1 through`、`@if a and`、
-            // `$x: a and` + 缩进续行）。
+            // Keyword continuation belongs to directives and declarations
+            // (`@for $i from 1 through`, `@if a and`, `$x: a and` + an indented continuation
+            // line).
             if !matches!(kind, Kind::AtRule | Kind::Decl) {
                 return false;
             }
@@ -612,7 +662,8 @@ fn continues(code: &str, kind: Kind, next_indent: Option<usize>, stmt_indent: us
     }
 }
 
-/// 扫描一行：更新跨行状态，给出终止符插入点与「语句能否在此结束」。
+/// Scan one line: update the cross-line state and report the terminator insertion point
+/// and whether "the statement may end here".
 fn scan_line(raw: &str, st: &mut Scan) -> ScanOut {
     let bytes = raw.as_bytes();
     let mut i = 0;
@@ -646,7 +697,7 @@ fn scan_line(raw: &str, st: &mut Scan) -> ScanOut {
                 i += 1;
             }
             b'\\' => i += 2,
-            // `//` 只在括号外才是行注释（`url(http://x)` 不是）。
+            // `//` is a line comment only outside parentheses (`url(http://x)` is not one).
             b'/' if bytes.get(i + 1) == Some(&b'/') && st.paren == 0 => {
                 code = raw[..i].trim_end().len();
                 break;
@@ -689,7 +740,8 @@ fn scan_line(raw: &str, st: &mut Scan) -> ScanOut {
     }
 }
 
-/// 语句类型（dart 1.93.2 实测：缩进语法里 `prop:value` 无空格即选择器）。
+/// Statement kind (observed with dart 1.93.2: in the indented syntax `prop:value`
+/// without a space is a selector).
 fn kind_of(body: &str) -> Kind {
     let bytes = body.as_bytes();
     match bytes.first() {
@@ -709,7 +761,8 @@ fn is_name_start(c: u8) -> bool {
     c.is_ascii_alphanumeric() || c == b'_' || c == b'-' || c >= 0x80
 }
 
-/// 首个顶层（不在字符串 / 括号 / 插值里）冒号的位置。
+/// Position of the first top-level colon (not inside a string / parentheses /
+/// interpolation).
 fn first_top_level_colon(body: &str) -> Option<usize> {
     let bytes = body.as_bytes();
     let mut i = 0;
@@ -761,7 +814,9 @@ fn first_top_level_colon(body: &str) -> Option<usize> {
 mod tests {
     use super::to_scss;
 
-    /// 块首行尾插 `{`、语句行尾插 `;`、关块在最后一条语句尾插 `}`（文件末尾的空行承载）。
+    /// Insert `{` at the end of a block-head line, `;` at the end of a statement line, and
+    /// `}` at the end of the last statement when closing a block (carried by the empty line
+    /// at the end of the file).
     #[test]
     fn nested_rule_and_decl() {
         assert_eq!(to_scss(".a\n  color: red\n"), ".a{\n  color: red;\n}\n");
@@ -783,8 +838,9 @@ mod tests {
         );
     }
 
-    /// dart 1.93.2 实测：`prop:value`（冒号后无空白）在选择器位置，不是声明；
-    /// 没有子块的嵌套选择器给空块（两侧都不产出 CSS）。
+    /// Observed with dart 1.93.2: `prop:value` (no whitespace after the colon) in a
+    /// selector position is not a declaration; a nested selector without a child block
+    /// gets an empty block (neither side emits CSS).
     #[test]
     fn declaration_without_space_is_selector() {
         assert_eq!(to_scss(".a\n  color:red\n"), ".a{\n  color:red{}\n}\n");
@@ -806,7 +862,8 @@ mod tests {
         );
     }
 
-    /// 行首 `//` 注释吞掉更深的续行（dart 的 comment continuation），这里保持为注释。
+    /// A leading `//` comment swallows deeper continuation lines (dart's comment
+    /// continuation); they stay comments here.
     #[test]
     fn line_comment_block_swallows_deeper_lines() {
         assert_eq!(
@@ -815,7 +872,8 @@ mod tests {
         );
     }
 
-    /// 终止符插在行尾 `//` 注释之前，否则会被注释吃掉。
+    /// The terminator goes before a trailing `//` comment, otherwise it would be eaten by
+    /// it.
     #[test]
     fn trailing_comment_keeps_terminator_before_it() {
         assert_eq!(
@@ -824,7 +882,7 @@ mod tests {
         );
     }
 
-    /// 值的续行靠行尾运算符，且必须更深。
+    /// A value continues through a trailing operator, and the continuation must be deeper.
     #[test]
     fn operator_continuation() {
         assert_eq!(
@@ -833,7 +891,8 @@ mod tests {
         );
     }
 
-    /// 完整语句后面跟左移的下一行时不能续行（`@use "x" as *` 是典型）。
+    /// A dedented next line after a complete statement must not continue it (`@use "x" as
+    /// *` is the typical case).
     #[test]
     fn complete_statement_never_continues_on_dedent() {
         assert_eq!(
@@ -850,7 +909,8 @@ mod tests {
         );
     }
 
-    /// 未闭合的 `/*` 由缩进回退收尾（dart 的缩进语法行为），不能吞掉后面的文件内容。
+    /// An unclosed `/*` is closed by dedentation (dart's indented-syntax behavior) and must
+    /// not swallow the rest of the file.
     #[test]
     fn block_comment_closed_by_dedent() {
         assert_eq!(
@@ -859,7 +919,7 @@ mod tests {
         );
     }
 
-    /// `@keyframes` 的 `from` / `to` 是选择器，不是续行关键字。
+    /// `from` / `to` of `@keyframes` are selectors, not continuation keywords.
     #[test]
     fn keyframe_selectors_are_not_keyword_continuations() {
         assert_eq!(
@@ -868,7 +928,7 @@ mod tests {
         );
     }
 
-    /// `url(http://x)` 里的 `//` 不是行注释。
+    /// The `//` in `url(http://x)` is not a line comment.
     #[test]
     fn slashes_inside_parens_are_not_comments() {
         assert_eq!(
@@ -877,7 +937,8 @@ mod tests {
         );
     }
 
-    /// 没有子块的语句：选择器给空块（dart 不产出任何 CSS），`@import` 给分号。
+    /// A statement without a child block: selectors get an empty block (dart emits no CSS),
+    /// `@import` gets a semicolon.
     #[test]
     fn bodyless_statement_gets_empty_block_or_semicolon() {
         assert_eq!(
@@ -890,7 +951,8 @@ mod tests {
         );
     }
 
-    /// 声明的值也能靠行尾 `and` + 更深缩进续行（dart 实测）。
+    /// A declaration value can also continue through a trailing `and` plus deeper
+    /// indentation (observed with dart).
     #[test]
     fn declaration_value_continues_on_keyword() {
         assert_eq!(

@@ -1,24 +1,24 @@
-/* 只有注释的规则：仍要包出选择器块（less 语义） */
+/* a rule with only comments: the selector block is still emitted (less semantics) */
 .a {
   /* only comment */
 }
-/* 注释 + 子规则：注释留在父块里，父块不能被丢掉 */
+/* comment + child rule: the comment stays in the parent block, which must not be dropped */
 .b {
   /* c */
 }
 .b .inner {
   x: 1;
 }
-/* 子规则内是最后一条语句：`}` 前的空白要 trim */
+/* last statement inside a child rule: whitespace before `}` is trimmed */
 .c .inner {
   y: 2;
 }
-/* 空块不输出 */
-/* 分号前空白 less 保留 */
+/* empty blocks are not emitted */
+/* less keeps whitespace before the semicolon */
 .e {
   padding: 10px ;
 }
-/* 子规则之间的注释提到父块 */
+/* comments between child rules are hoisted into the parent block */
 .f {
   /* mid */
 }

@@ -1,11 +1,13 @@
-//! 产出装配：注释游标、静态容器校验、块/声明排序辅助。
+//! Output assembly: comment cursor, static container validation, helpers for
+//! block/declaration ordering.
 //!
-//! 由 `scss/mod.rs` 拆分而来（纯搬运）。
+//! Split out of `scss/mod.rs` (pure code move).
 
 use super::*;
 
 impl<'a> Converter<'a> {
-    /// 输出游标之前的注释。`#{}` 在这里求值（mixin 体里的横幅注释依赖它）。
+    /// Emit the comments before the cursor. `#{}` is evaluated here (banner comments
+    /// in mixin bodies rely on it).
     pub(super) fn flush_comments(
         &mut self,
         limit: usize,
@@ -40,7 +42,8 @@ impl<'a> Converter<'a> {
     }
 }
 
-/// mixin 体（含嵌套块）里是否出现 `@content`：决定传 content 块是否报错。
+/// Whether `@content` appears in a mixin body (including nested blocks): decides
+/// whether passing a content block is an error.
 pub(super) fn has_content(stmts: &[Statement<'_>]) -> bool {
     stmts.iter().any(|st| match st {
         Statement::AtRule(at) => {
@@ -64,7 +67,8 @@ pub(super) fn has_content(stmts: &[Statement<'_>]) -> bool {
     })
 }
 
-/// 静态容器校验：一次遍历整份（已合并的）样式表，与是否执行到无关。
+/// Static container validation: one pass over the whole (merged) stylesheet,
+/// independent of whether it is executed.
 pub(super) fn validate_structure(
     merged: &Merged,
     stmts: &[Statement<'_>],
@@ -83,7 +87,8 @@ fn validate_block(
     };
     for stmt in stmts {
         match stmt {
-            // function 体只能是「变量 + 控制流 + @return/@debug/@warn/@error」。
+            // A function body may only contain variables, control flow and
+            // @return/@debug/@warn/@error.
             Statement::Declaration(decl) if nesting.function => {
                 return fail(
                     decl.span.start,
@@ -98,7 +103,7 @@ fn validate_block(
             }
             Statement::AtRule(at) => {
                 let name = at.name.name.to_ascii_lowercase();
-                // dart 报的是 at-rule 整体 span 的起点（即 `@`）。
+                // dart reports the start of the whole at-rule span (i.e. the `@`).
                 let at_pos = at.span.start;
                 if nesting.function && !Nesting::function_allows(&name) {
                     return fail(at_pos, NOT_ALLOWED);
@@ -127,7 +132,8 @@ fn validate_block(
                         }
                     }
                     "return" if !nesting.function => return fail(at_pos, NOT_ALLOWED),
-                    // content 块里的 `@content` 也是错的（dart 只认 `_inMixin`）。
+                    // `@content` inside a content block is also an error (dart only
+                    // checks `_inMixin`).
                     "content" if !nesting.mixin => {
                         return fail(
                             at_pos,
@@ -189,12 +195,14 @@ fn validate_block(
     Ok(())
 }
 
-/// 空块会被整块丢弃的条件 at-rule（dart-sass 实测：只有 media / supports）。
+/// Conditional at-rules whose whole block is dropped when empty (observed with
+/// dart-sass: only media / supports).
 pub(super) fn is_conditional(name: &str) -> bool {
     matches!(name, "media" | "supports")
 }
 
-/// 体只允许声明的 at-rule（`@font-face` 里出现 `@include` 也要走声明列表）。
+/// At-rules whose body may only contain declarations (`@include` inside
+/// `@font-face` also goes through the declaration list).
 pub(super) fn is_decl_at_rule(name: &str) -> bool {
     matches!(
         name,
@@ -202,7 +210,8 @@ pub(super) fn is_decl_at_rule(name: &str) -> bool {
     )
 }
 
-/// 给节点打上「源级规则组的结尾」标记（序列化时空一行）。
+/// Mark a node as the end of a source-level rule group (a blank line is emitted
+/// when serializing).
 pub(super) fn mark_group_end(item: &mut Item) {
     match item {
         Item::Rule(rule) => rule.group_end = true,

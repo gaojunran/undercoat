@@ -10,13 +10,13 @@ use crate::merge::{Merged, Part};
 use super::Compiler;
 use super::prelude::{REFERENCE_AT, is_remote, split_signed_dimensions};
 
-/// 把 `@import` 展开成文本内联（less 的导入就是共享作用域的合并）。
+/// Expands `@import` into text inlining (a less import is a merge into a shared scope).
 ///
-/// 只处理静态路径：带插值的导入留在 AST 里，由 `emit_import` 在求值后处理；
-/// `.css` 与 `(css)` 导入保持原样（作为 CSS `@import` 输出）。
+/// Only static paths are handled: imports with interpolation stay in the AST and are
+/// processed by `emit_import` after evaluation; `.css` and `(css)` imports are kept as-is (emitted as a CSS `@import`).
 ///
-/// 展开前先对每个文件单独做 `split_signed_dimensions`，因此段表的偏移与各文件
-/// 的行表自洽（合并后再补空格会让后续 token 的列漂移）。
+/// Each file runs through `split_signed_dimensions` separately before expansion, so segment-table offsets stay
+/// consistent with each file's line table (padding after merging would shift the columns of later tokens).
 #[allow(clippy::too_many_arguments)]
 pub(super) fn expand_imports(
     path: &Path,
@@ -41,8 +41,8 @@ pub(super) fn expand_imports(
         multiple,
         merged,
     );
-    // 第二轮：路径插值。less 的变量是延迟求值的，所以路径里的变量可能来自
-    // 后面的导入，只能在第一轮静态内联完成后再用根作用域求值。
+    // Second pass: path interpolation. less variables are lazily evaluated, so a variable in a path may come from
+    // a later import and can only be evaluated in the root scope after the first static inlining pass.
     let vars = root_vars(&first.text);
     if vars.is_empty() || !first.text.contains("@{") {
         return first;
@@ -52,7 +52,7 @@ pub(super) fn expand_imports(
     )
 }
 
-/// 单轮导入内联：`vars` 非空时也处理带插值的路径。
+/// One inlining pass: also handles interpolated paths when `vars` is non-empty.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn expand_import_pass(
     path: &Path,
@@ -70,7 +70,7 @@ pub(super) fn expand_import_pass(
         .syntax(Syntax::Less)
         .build();
     let Ok(ast) = parser.parse::<Stylesheet>() else {
-        // 解析失败留给主流程报错，保持原有错误信息
+        // Leave parse failures to the main flow so the original error message is kept
         return input;
     };
     let mut edits: Vec<(usize, usize, &AtRule)> = Vec::new();
@@ -90,7 +90,7 @@ pub(super) fn expand_import_pass(
             .text
             .get(prelude.span().start..prelude.span().end)
             .unwrap_or("");
-        // 语句区间不含末尾分号
+        // The statement span does not include the trailing semicolon
         let mut stop = end;
         let rest = &input.text[end..];
         if let Some(pos) = rest.find(|c: char| !c.is_whitespace()) {
@@ -131,7 +131,7 @@ pub(super) fn collect_imports<'a, 'b>(
     }
 }
 
-/// 单个导入的替换文本；`None` 表示保持原语句不动。
+/// Replacement text for a single import; `None` keeps the statement unchanged.
 #[allow(clippy::too_many_arguments)]
 pub(super) fn import_replacement(
     raw: &str,
@@ -148,7 +148,7 @@ pub(super) fn import_replacement(
 ) -> Option<Part> {
     let (options, rest) = split_import_options(raw);
     let (href, media) = split_quoted_path(&rest)?;
-    // 路径插值在作用域里求值（less 延迟求值：变量可能来自别的导入）
+    // Path interpolation is evaluated in the scope (less lazy evaluation: the variable may come from another import)
     let href = if href.contains("@{") {
         let resolved = substitute_vars(&href, vars);
         if resolved.contains("@{") {
@@ -163,12 +163,12 @@ pub(super) fn import_replacement(
     }
     let css_only = options.iter().any(|o| o == "css");
     let optional = options.iter().any(|o| o == "optional");
-    // (inline) 原文透传，由 emit_import 在读文件后直接写出（less 不解析它）
+    // (inline) is passed through verbatim and written out by emit_import after reading the file (less does not parse it)
     if css_only || options.iter().any(|o| o == "inline") {
         return None;
     }
     let force_less = options.iter().any(|o| o == "less");
-    // CSS import（`.css` / `?css` 等）不内联，保留成 CSS @import（less 同规则）
+    // CSS imports (`.css` / `?css`, etc.) are not inlined and are kept as CSS @import (same rule as less)
     if !force_less && is_css_path(&href) {
         return None;
     }
@@ -180,11 +180,11 @@ pub(super) fn import_replacement(
         return None;
     }
     let key = resolved.canonicalize().unwrap_or_else(|_| resolved.clone());
-    // 循环导入：祖先链上已出现，不再内联
+    // Circular import: already present on the ancestor chain, no further inlining
     if chain.contains(&key) {
         return Some(Part::empty());
     }
-    // `(multiple)` 的整棵子树跳过 import-once 去重（less 的 context.importMultiple 向下传递）
+    // The whole subtree of `(multiple)` skips import-once deduplication (less's context.importMultiple propagates down)
     let multiple = multiple || options.iter().any(|o| o == "multiple");
     if !multiple && seen.contains(&key) {
         return Some(Part::empty());
@@ -199,13 +199,13 @@ pub(super) fn import_replacement(
     let body = expand_imports(&resolved, &text, opts, seen, chain, deps, multiple, merged);
     chain.pop();
     let body = if options.iter().any(|o| o == "reference") {
-        // (reference)：定义照常可见，但不产生输出
+        // (reference): definitions remain visible as usual but produce no output
         Part::wrap(&format!("\n@{REFERENCE_AT} {{\n"), &body, "\n}\n", host, at)
     } else {
         body
     };
     Some(if trimmed.is_empty() {
-        // 补一个换行，避免与相邻 token 粘连
+        // Add a newline to avoid sticking to adjacent tokens
         Part::wrap("\n", &body, "\n", host, at)
     } else {
         Part::wrap(
@@ -218,7 +218,7 @@ pub(super) fn import_replacement(
     })
 }
 
-/// `@{name}` 文本替换（导入路径用，未定义的原样保留）。
+/// `@{name}` text substitution (for import paths; undefined names are kept verbatim).
 pub(super) fn substitute_vars(text: &str, vars: &HashMap<String, String>) -> String {
     let mut out = String::with_capacity(text.len());
     let mut rest = text;
@@ -237,7 +237,7 @@ pub(super) fn substitute_vars(text: &str, vars: &HashMap<String, String>) -> Str
     out
 }
 
-/// 根作用域的变量文本（导入路径插值用）：只处理字面量，迭代展开引用。
+/// Variable text in the root scope (for import path interpolation): only literals are handled, and references are expanded iteratively.
 pub(super) fn root_vars(source: &str) -> HashMap<String, String> {
     let alloc = Allocator::default();
     let mut parser = ParserBuilder::new(&alloc, source)
@@ -275,7 +275,7 @@ pub(super) fn root_vars(source: &str) -> HashMap<String, String> {
     vars
 }
 
-/// 去掉成对的引号（`"in"` → `in`）。
+/// Removes a matching pair of quotes (`"in"` → `in`).
 pub(super) fn unquote_text(text: &str) -> String {
     let bytes = text.as_bytes();
     match (bytes.first(), bytes.last()) {
@@ -286,10 +286,10 @@ pub(super) fn unquote_text(text: &str) -> String {
     }
 }
 
-/// 拆出导入选项：`(reference) "x.less" screen` → (`["reference"]`, `"x.less" screen`)。
+/// Splits out import options: `(reference) "x.less" screen` → (`["reference"]`, `"x.less" screen`).
 ///
-/// 只有已知选项名才算选项：路径后的 `(min-width: 600px)` 是媒体查询特征，
-/// `url(…)` 是路径本身，都不能当选项吃掉。
+/// Only known option names count as options: a `(min-width: 600px)` after the path is a media query feature
+/// and `url(…)` is the path itself; neither may be consumed as options.
 pub(super) fn split_import_options(raw: &str) -> (Vec<String>, String) {
     let mut options = Vec::new();
     let head_end = raw.find(['"', '\'']).unwrap_or(raw.len());
@@ -325,9 +325,9 @@ pub(super) fn is_import_options(inner: &str) -> bool {
     })
 }
 
-/// 从 `"x.less" screen` 里取出引号路径与剩余媒体查询。
+/// Extracts the quoted path and the remaining media query from `"x.less" screen`.
 pub(super) fn split_quoted_path(rest: &str) -> Option<(String, String)> {
-    // `url("x.less")`：括号也是路径的一部分，媒体查询在其后
+    // `url("x.less")`: the parentheses are part of the path and the media query follows
     if let Some(at) = rest.find("url(") {
         let inner = &rest[at + 4..];
         let close = inner.find(')')?;
@@ -342,8 +342,8 @@ pub(super) fn split_quoted_path(rest: &str) -> Option<(String, String)> {
     Some((href, tail[end + 1..].to_string()))
 }
 
-/// less 的 CSS import 判定（tree/import.js:36）：`/[#.&?]css([?;].*)?$/`。
-/// WDT 的 wxss 转义正是靠 `?css` 命中这一条，使导入以 `@import` 原样输出。
+/// less's CSS import test (tree/import.js:36): `/[#.&?]css([?;].*)?$/`.
+/// WDT's wxss escape works precisely through `?css` matching this rule, so the import is emitted verbatim as `@import`.
 pub(super) fn is_css_path(path: &str) -> bool {
     let b = path.as_bytes();
     (1..b.len().saturating_sub(2)).any(|i| {
@@ -369,15 +369,15 @@ impl<'a> Compiler<'a> {
         if candidate.is_file() {
             return Some(candidate);
         }
-        // less 的默认补全：无后缀时试 .less
+        // less's default completion: try .less when there is no extension
         if Path::new(href).extension().is_none() {
             let with_ext = base.join(format!("{href}.less"));
             if with_ext.is_file() {
                 return Some(with_ext);
             }
         }
-        // 插值路径的导入在 AST 层求值，已经不知道原文件目录了：
-        // 依次试所有被内联过的文件所在目录（less 的导入是共享作用域的合并）。
+        // Imports with interpolated paths are evaluated at the AST layer and no longer know the original file directory:
+        // try the directory of every inlined file in turn (a less import is a merge into a shared scope).
         for dep in &self.deps {
             let dir = Path::new(dep).parent()?;
             for name in [href.to_string(), format!("{href}.less")] {

@@ -8,14 +8,14 @@ use super::imports::{is_css_path, split_import_options, split_quoted_path};
 use super::value;
 use crate::doc::Comment;
 
-/// `(reference)` 导入在文本里包成的 at-rule 名：块内定义可用，但不输出。
+/// at-rule name that a `(reference)` import is wrapped in within the text: definitions inside the block are available but not emitted.
 pub(super) const REFERENCE_AT: &str = "-style-ref";
 
-/// less 的单位是 `%|[a-z_]+`，所以 `6px-1px` 在 less 里是 `6px` 减 `1px`；
-/// 而 CSS 词法会把 `px-1px` 整段当单位。这里在数字+字母单位与紧随的 `-数字`
-/// 之间补一个空格，让后续 AST 与 less 同构（字符串与注释内不动）。
+/// less units are `%|[a-z_]+`, so in less `6px-1px` is `6px` minus `1px`;
+/// while CSS tokenization treats `px-1px` as one unit. Here a space is inserted
+/// between a numeric+alphabetic unit and a following `-number` so the resulting AST matches less (strings and comments are untouched).
 ///
-/// 没有需要修补的片段时返回原串的拷贝（调用方仍按新串解析/打印，偏移自洽）。
+/// Returns a copy of the original string when there is nothing to patch (callers still parse/print the new string, with consistent offsets).
 pub(super) fn split_signed_dimensions(src: &str) -> String {
     let bytes = src.as_bytes();
     let mut out: Vec<u8> = Vec::with_capacity(src.len());
@@ -63,7 +63,7 @@ pub(super) fn split_signed_dimensions(src: &str) -> String {
             continue;
         }
         if c.is_ascii_digit() || (c == b'.' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit)) {
-            // 标识符内部（`.bug-100cm-1m`、`a100px-1px`）不是数值上下文
+            // Inside an identifier (`.bug-100cm-1m`, `a100px-1px`) this is not a numeric context
             if i > 0
                 && matches!(bytes[i - 1], b if b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-' | b'.' | b'#' | b'\\') || b >= 0x80)
             {
@@ -86,7 +86,7 @@ pub(super) fn split_signed_dimensions(src: &str) -> String {
                 i += 1;
             }
             let unit = &src[unit_start..i];
-            // `1e-3` 的指数不是单位
+            // The exponent of `1e-3` is not a unit
             let signed = !unit.is_empty()
                 && !unit.eq_ignore_ascii_case("e")
                 && bytes.get(i) == Some(&b'-')
@@ -96,7 +96,7 @@ pub(super) fn split_signed_dimensions(src: &str) -> String {
                 });
             out.extend_from_slice(&bytes[start..i]);
             if signed {
-                // 两侧都要空格：`6px -1px` 会让解析器把 `-1px` 当成缺失运算符
+                // Spaces on both sides are required: `6px -1px` makes the parser treat `-1px` as a missing operator
                 out.extend_from_slice(b" - ");
                 i += 1;
             }
@@ -108,7 +108,7 @@ pub(super) fn split_signed_dimensions(src: &str) -> String {
     String::from_utf8(out).expect("utf8")
 }
 
-/// 源码里有 `@plugin` 指令（任意层级）：插件可在求值期注入变量，严格报错要关掉。
+/// The source contains an `@plugin` directive (at any nesting level): plugins can inject variables during evaluation, so strict errors must be disabled.
 pub(super) fn has_plugin(stmts: &[Statement]) -> bool {
     stmts.iter().any(|st| match st {
         Statement::AtRule(a) => {
@@ -134,13 +134,13 @@ pub(super) fn is_charset(at: &AtRule) -> bool {
     at.name.name.eq_ignore_ascii_case("charset")
 }
 
-/// 远程 URL（`https://` / `//host/…`）：没有下载器，按 CSS import 原样保留。
+/// Remote URL (`https://` / `//host/…`): there is no downloader, so it is kept as a CSS import verbatim.
 pub(super) fn is_remote(href: &str) -> bool {
     href.contains("://") || href.starts_with("//")
 }
 
-/// 只有「原样保留的 CSS import」会被 less 提前到其它节点之前（`importNodeIndex`）；
-/// 内联的 `.less` / `(inline)` 导入留在源序里。
+/// Only "CSS imports kept verbatim" are hoisted before other nodes by less (`importNodeIndex`);
+/// inlined `.less` / `(inline)` imports stay in source order.
 pub(super) fn is_hoisted_import(text: &str) -> bool {
     let (options, rest) = split_import_options(text);
     if options.iter().any(|o| o == "inline" || o == "less") {
@@ -154,7 +154,7 @@ pub(super) fn is_import(at: &AtRule) -> bool {
     at.name.name.eq_ignore_ascii_case("import")
 }
 
-/// 体要继承父选择器的 at-rule（less 里 `isRooted = false` 的那些）。
+/// at-rules whose body inherits the parent selectors (the ones with `isRooted = false` in less).
 pub(super) fn at_rule_keeps_parents(name: &str) -> bool {
     let bare = name.trim_start_matches('@');
     let bare = match bare.strip_prefix('-') {
@@ -167,7 +167,7 @@ pub(super) fn at_rule_keeps_parents(name: &str) -> bool {
     )
 }
 
-/// at-rule prelude 归一：括号内 `prop:value` → `prop: value`（less 输出形态）。
+/// at-rule prelude normalization: `prop:value` inside parentheses → `prop: value` (the less output form).
 pub(super) fn normalize_prelude(raw: &str) -> String {
     let mut out = String::with_capacity(raw.len() + 4);
     let chars: Vec<char> = raw.chars().collect();
@@ -184,7 +184,7 @@ pub(super) fn normalize_prelude(raw: &str) -> String {
     out
 }
 
-/// `~"..."` → 内文：media prelude 里的转义字符串按普通文本输出。
+/// `~"..."` → inner text: escape strings in a media prelude are emitted as plain text.
 pub(super) fn strip_escapes(raw: &str) -> String {
     if !raw.contains('~') {
         return raw.to_string();
@@ -221,11 +221,11 @@ pub(super) fn strip_escapes(raw: &str) -> String {
 }
 
 impl<'a> Compiler<'a> {
-    /// @media 的条件文本（求值 + less 的 feature 归一化）。
+    /// Condition text of @media (evaluated + less feature normalization).
     ///
-    /// 返回 `(文本, 要移到体里的注释)`。less 在读完 at-rule 名后清空 commentStore
-    /// （名字前的注释丢掉），之后的注释对 @media/@keyframes 这类列表型 prelude
-    /// 会成为体内规则列表的首批节点；其它 at-rule 的 prelude 注释留在原文里。
+    /// Returns `(text, comments to move into the body)`. less clears the commentStore after
+    /// reading the at-rule name (comments before the name are dropped); later comments in a list-like prelude
+    /// such as @media/@keyframes become the first nodes of the body's rule list; prelude comments of other at-rules stay in the text.
     pub(super) fn at_prelude(&mut self, at: &AtRule) -> (String, Vec<Comment>) {
         let start = at.name.span().end;
         let end = match &at.block {
@@ -237,7 +237,7 @@ impl<'a> Compiler<'a> {
         }
         let span = Span { start, end };
         let full = self.slice(span);
-        // `raw` 是 trim 过的：注释在 `raw` 里的下标要加回被裁掉的前导空白才是绝对偏移。
+        // `raw` is trimmed: indices of comments in `raw` must be offset by the trimmed leading whitespace to get absolute positions.
         let base = span.start + full.len() - full.trim_start().len();
         let raw = full.trim().to_string();
         let name = at.name.name.to_ascii_lowercase();
@@ -256,8 +256,8 @@ impl<'a> Compiler<'a> {
         let mut plain = String::with_capacity(raw.len());
         let mut cursor = 0;
         let mut content_seen = false;
-        // less 把 prelude 里的注释挂到“下一个值”上：@media 特征里 `: ` 之后；
-        // 找不到值时落到体外块的首部。
+        // less attaches prelude comments to the "next value": in an @media feature, after `: `;
+        // when no value is found, they land at the head of the enclosing block.
         let mut pending: Vec<(usize, Comment)> = Vec::new();
         for &(start, end) in &comments {
             let piece = &raw[cursor..start];
@@ -272,14 +272,14 @@ impl<'a> Compiler<'a> {
             });
             plain.push_str(piece);
             cursor = end;
-            // 名字后、首个内容前的注释被 less 清掉
+            // Comments after the name and before the first content are cleared by less
             if !content_seen {
                 continue;
             }
             let comment = self.comment(abs, abs + text.len());
             match (is_media, listy) {
                 (true, _) => {
-                    // 注释占位成一个空格，避免去掉后两个 token 粘连成 `and(max-width`
+                    // The comment holds a space so the two tokens do not merge into `and(max-width` when it is removed
                     plain.push(' ');
                     pending.push((plain.len(), comment));
                 }
@@ -309,10 +309,10 @@ impl<'a> Compiler<'a> {
     }
 
     pub(super) fn finish_prelude(&self, at: &AtRule, raw: String, span: Span) -> String {
-        // prelude 里的 `@var` / `@{var}` 按当前作用域求值（less 在 prelude 层求值）
+        // `@var` / `@{var}` in a prelude are evaluated in the current scope (less evaluates at the prelude level)
         let raw = value::substitute(&raw, self.src, &self.env, 0, Some(span));
-        // 只有 @media 的 feature 会被 less 归一（`(min-width:100px)` → 加空格）；
-        // @supports 的 prelude 由 less 原样透传。
+        // Only @media features are normalized by less (`(min-width:100px)` → a space is added);
+        // the @supports prelude is passed through verbatim by less.
         if at.name.name.eq_ignore_ascii_case("media") {
             normalize_prelude(&strip_escapes(&raw))
         } else {

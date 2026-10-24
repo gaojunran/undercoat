@@ -1,4 +1,4 @@
-//! 对拍/调试 CLI：`undercoat <file.(less|scss|css|wxss)> [--source-map] [--project-root DIR] [-o OUT]`
+//! Conformance/debug CLI: `undercoat <file.(less|scss|css|wxss)> [--source-map] [--project-root DIR] [-o OUT]`
 
 use std::path::PathBuf;
 
@@ -103,7 +103,8 @@ fn main() {
         Ok(output) => {
             match &out {
                 Some(path) => {
-                    // dart-sass CLI 写文件时补尾随换行；API 产物本身没有。
+                    // The dart-sass CLI appends a trailing newline when writing files; the API
+                    // output itself has none.
                     let body = if file.extension().is_some_and(|e| e != "less") {
                         format!("{}\n", output.css)
                     } else {

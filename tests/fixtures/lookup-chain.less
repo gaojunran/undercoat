@@ -1,4 +1,4 @@
-// 属性 / 命名空间查找：属性、变量、嵌套链、动态属性名
+// property / namespace lookups: properties, variables, nested chains, dynamic property names
 @p: {
   text: white;
   @v: 42;
@@ -15,11 +15,11 @@
   four: @p[@nested][@deeper];
 }
 
-// `$@name`：变量求值后再按属性名查找
+// `$@name`: evaluate the variable, then look up by the resulting property name
 @prop-name: text;
 .h { v: @p[$@prop-name]; }
 
-// `@@name`：变量求值后再按变量名查找
+// `@@name`: evaluate the variable, then look up by the resulting variable name
 @schemes: {
   @primary: { color: blue; }
   @secondary: { color: red; }
@@ -33,14 +33,14 @@
   .pick(secondary);
 }
 
-// 命名空间选择器 + 属性查找
+// namespace selector + property lookup
 #ns {
   my-prop: prop-value;
 }
 @ns-prop: my-prop;
 .j { v: #ns[$@ns-prop]; }
 
-// 查找结果参与运算与插值
+// lookup results take part in arithmetic and interpolation
 @sizes: {
   base: 10px;
   @scale: 3;

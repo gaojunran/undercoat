@@ -1,4 +1,4 @@
-// `&:extend(...)` 与选择器组/嵌套里的 extend
+// `&:extend(...)` and extend inside selector groups/nesting
 .base {
   display: block;
 }
@@ -17,7 +17,7 @@
     font-weight: bold;
   }
 }
-// mixin 体里的 extend 在展开处生效
+// an extend inside a mixin body takes effect at the expansion site
 .ext-mixin() {
   &:extend(.base);
 }

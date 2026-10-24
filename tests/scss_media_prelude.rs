@@ -1,8 +1,10 @@
-//! `@media` prelude 里的 SassScript 算术。
+//! SassScript arithmetic inside `@media` preludes.
 //!
-//! dart 的 `MediaQuery.value` 是表达式：`(max-width: $bp - 1px)` 求值成 `768px`。
-//! 我们旧实现只做裸 `$var` 文本替换，算术原样漏进产物 —— 媒体特性值不接受算术，
-//! 整条查询会失效（响应式断点静默消失）。期望值全部来自 dart-sass 1.93.2。
+//! In dart, `MediaQuery.value` is an expression: `(max-width: $bp - 1px)` evaluates to
+//! `768px`. Our old implementation only did textual substitution of a bare `$var`, so the
+//! arithmetic leaked into the output verbatim — media feature values do not accept
+//! arithmetic, so the whole query was dropped (responsive breakpoints silently vanished).
+//! All expectations come from dart-sass 1.93.2.
 
 use std::path::Path;
 
@@ -14,7 +16,7 @@ fn css(source: &str) -> String {
         .css
 }
 
-/// 产物里的 `@media` 行（去掉块首）。
+/// The `@media` lines of the output (with the block opener stripped).
 fn media(prelude: &str) -> String {
     css(prelude)
         .lines()
@@ -42,7 +44,8 @@ fn media_values_evaluate_sass_arithmetic() {
 
 #[test]
 fn media_queries_keep_their_css_structure() {
-    // 媒体类型、`and`/`not`、多条查询、范围语法都保持 CSS 结构。
+    // Media types, `and`/`not`, multiple queries and range syntax all keep their CSS
+    // structure.
     let source = "$bp: 769px;
 @media screen and (max-width: $bp - 1px) and (min-width: $bp * 0 + 400px) { .a { x: 1 } }
 @media not print and (min-width: $bp) { .b { y: 2 } }
@@ -76,7 +79,8 @@ $m: (k: 700px);
 
 #[test]
 fn media_values_that_cannot_be_evaluated_stay_as_written() {
-    // `var()` 与其它不可求值形态保持原样（含裸 `$var` 的文本替换口径）。
+    // `var()` and other non-evaluable forms stay as written (including the textual
+    // substitution of a bare `$var`).
     let source = "$bp: 769px;
 @media (max-width: var(--x)) { .a { x: 1 } }
 @media (min-width: $bp) { .b { y: 2 } }

@@ -1,4 +1,4 @@
-// 声明式 at-rule 的体是 root ruleset：父选择器不往里传播
+// the body of a declarative at-rule is a root ruleset: the parent selector does not propagate into it
 .onTop {
   @font-face {
     font-family: something;
@@ -13,11 +13,11 @@
   animation: "textscale";
 }
 
-// 空的媒体块整条丢掉
+// an empty media block is dropped entirely
 @media (min-width: 600px) {
 }
 
-// 空 at-rule 块里有注释时保留
+// an empty at-rule block is kept when it contains comments
 @media (min-width: 700px) {
   /* kept */
 }

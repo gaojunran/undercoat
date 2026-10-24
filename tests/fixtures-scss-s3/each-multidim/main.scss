@@ -1,4 +1,4 @@
-// 多维 list 解构：元素本身是 list 时按位置拆开，多出来的变量取 null。
+// destructuring multi-dimensional lists: an element that is itself a list is split by position, and extra variables get null.
 @each $a, $b in (1 2, 3 4, 5 6) {
   .d-#{$a} {
     span: $b;
@@ -17,14 +17,14 @@
   }
 }
 
-// 元素是单值时按「一个元素的 list」处理。
+// a scalar element is treated as a one-item list.
 @each $a, $b in (1, 2) {
   .single-#{$a} {
     second: inspect($b);
   }
 }
 
-// 空 list：循环体一次都不执行。
+// empty list: the loop body never runs.
 @each $x in () {
   .never-#{$x} {
     v: $x;

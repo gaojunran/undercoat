@@ -1,4 +1,4 @@
-// 实参里出现 var()/env()/min()/max()/clamp() 时，颜色函数整体透传成纯 CSS。
+// when var()/env()/min()/max()/clamp() appears in an argument, the color function is passed through as plain CSS.
 .chip {
   a: rgb(var(--bs-tertiary-color-rgb));
   b: rgba(var(--c), .5);
@@ -11,13 +11,13 @@
   i: color(var(--x));
 }
 
-// 空格分隔写法同样透传。
+// the space-separated form is passed through as well.
 .space {
   a: rgb(0 0 0 / var(--o));
   b: hsl(var(--h) 50% 50%);
 }
 
-// 纯数字实参仍然按 Sass 颜色函数求值。
+// purely numeric arguments are still evaluated by the Sass color functions.
 .real {
   a: rgb(0, 0, 0);
   b: rgba(0, 0, 0, .5);

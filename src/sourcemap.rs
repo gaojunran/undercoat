@@ -1,4 +1,4 @@
-//! sourcemap v3 生成（VLQ 编码）。less/sass 两个引擎共用同一套 builder。
+//! sourcemap v3 generation (VLQ encoding). The less and sass engines share one builder.
 
 use std::collections::BTreeMap;
 
@@ -23,7 +23,8 @@ fn vlq(v: i64, out: &mut String) {
     }
 }
 
-/// 一条映射：生成位置（0-based 行列）+ 源位置（0-based 行列）+ 源文件下标。
+/// One mapping: generated position (0-based line/column) + source position (0-based
+/// line/column) + source file index.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub(crate) struct Mapping {
     pub(crate) gen_line: u32,
@@ -36,7 +37,8 @@ pub(crate) struct Mapping {
 #[derive(Debug, Default)]
 pub(crate) struct Builder {
     pub(crate) sources: Vec<String>,
-    /// 与 `sources` 平行；全为 `None` 时 JSON 不输出 `sourcesContent`（单文件 map 字节不变）。
+    /// Parallel to `sources`; when all are `None` the JSON omits `sourcesContent` (single-file
+    /// map bytes stay unchanged).
     contents: Vec<Option<String>>,
     mappings: BTreeMap<(u32, u32), (u32, u32, u32)>,
 }
@@ -55,7 +57,7 @@ impl Builder {
         (self.sources.len() - 1) as u32
     }
 
-    /// 登记某个 source 的原文（`sourcesContent`）。
+    /// Record a source's original text (`sourcesContent`).
     pub(crate) fn set_content(&mut self, index: u32, content: &str) {
         if let Some(slot) = self.contents.get_mut(index as usize) {
             *slot = Some(content.to_string());
@@ -63,7 +65,8 @@ impl Builder {
     }
 
     pub(crate) fn add(&mut self, m: Mapping) {
-        // 同一生成位置只保留第一条（后到的通常是空白补齐，不覆盖实质映射）
+        // Keep only the first entry per generated position (later ones are usually
+        // whitespace padding and must not overwrite a substantive mapping)
         self.mappings
             .entry((m.gen_line, m.gen_col))
             .or_insert((m.src_file, m.src_line, m.src_col));
@@ -101,8 +104,9 @@ impl Builder {
         out
     }
 
-    /// 序列化成 sourcemap v3 JSON（字段序与 less/sass 的产出一致：
-    /// version / sources / names / mappings，无 `file`；有原文时附 `sourcesContent`）。
+    /// Serialize to sourcemap v3 JSON (field order matches the less/sass output:
+    /// version / sources / names / mappings, no `file`; `sourcesContent` is added when
+    /// originals are available).
     pub(crate) fn to_json(
         &self,
         source_root: Option<&str>,
@@ -130,7 +134,7 @@ mod tests {
 
     #[test]
     fn vlq_known_values() {
-        // source-map 规范示例：0 -> "A", 1 -> "C", -1 -> "D", 16 -> "gB"
+        // Example from the source-map spec: 0 -> "A", 1 -> "C", -1 -> "D", 16 -> "gB"
         let mut s = String::new();
         vlq(0, &mut s);
         assert_eq!(s, "A");

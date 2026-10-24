@@ -1,4 +1,4 @@
-// (reference)：未被引用的规则不输出；被 extend 命中的规则按 less 语义补输出声明
+// (reference): unreferenced rules are not emitted; rules hit by extend get their declarations emitted per less semantics
 @import (reference) "imports/reference-extend-src.less";
 
 .x {
@@ -10,9 +10,9 @@
   own: 1;
 }
 
-// 多声明被扩展：less 在 (reference) 体里不为声明补换行（`a: 1;b: 2;`）
+// multiple declarations extended: inside a (reference) body less adds no line break between declarations (`a: 1;b: 2;`)
 .z:extend(.ref-multi) {
   z: 1;
 }
 
-// .ref-unused 没有被引用，整条不输出
+// .ref-unused is never referenced, so nothing is emitted for it

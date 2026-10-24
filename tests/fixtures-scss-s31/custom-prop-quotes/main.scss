@@ -1,4 +1,4 @@
-// 自定义属性走原文透传，但字符串要归一双引号（dart 的 quoted string 规则）。
+// custom properties are passed through verbatim, but strings are normalized to double quotes (dart's quoted string rule).
 :root {
   --a: 'a b', 'c';
   --b: 'in';
@@ -11,7 +11,7 @@
   --i: 'q'!important;
 }
 
-// 换行的值按「输出缩进 − 最小缩进」重排，空行后的缩进保留。
+// multi-line values are reindented by output indent − the minimum indent; indentation after a blank line is kept.
 .j {
   --k: a,
        b,
@@ -20,7 +20,7 @@
     ;
 }
 
-// 普通声明的字符串同样归一（对照）。
+// strings in ordinary declarations are normalized the same way (for comparison).
 .m {
   content: 'q';
   font-family: 'Helvetica Neue', 'Arial';

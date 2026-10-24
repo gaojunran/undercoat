@@ -1,14 +1,17 @@
-//! SassScript 求值：表达式解析（含 `/` 重分组）→ 类型化值 → 变量/作用域。
+//! SassScript evaluation: expression parsing (including `/` regrouping) -> typed values ->
+//! variables/scope.
 //!
-//! 解析器不直接用 oxc 的表达式树：oxc 的优先级与 dart-sass 的「斜杠语法」不同
-//! （`1 / 2 * 3` 会被折成 `1 / (2 * 3)`）。这里把 oxc 的表达式节点**摊平成
-//! token 序列**（`SassBinaryExpression` 递归还原成中缀顺序），再用 dart-sass 的
-//! 优先级重新分组：
+//! The parser does not use oxc's expression tree directly: oxc's precedence differs from
+//! dart-sass's "slash syntax" (`1 / 2 * 3` is folded into `1 / (2 * 3)`). Here the oxc
+//! expression nodes are **flattened into a token sequence** (`SassBinaryExpression` is
+//! restored to infix order recursively) and then regrouped by dart-sass's precedence:
 //!
-//! - 优先级：`or` < `and` < `== !=` < `< <= > >=` < `+ -` < `* / %` < 一元；
-//! - `/` 是普通二元除法，但「整棵子树只由 `/` 与字面数字组成」时结果保留
-//!   `a/b` 的书写形态（dart 的 `SassNumber.withSlash`）；
-//! - 参与其它算术、变量赋值、括号内、作为其它运算的操作数 → 丢掉书写形态。
+//! - precedence: `or` < `and` < `== !=` < `< <= > >=` < `+ -` < `* / %` < unary;
+//! - `/` is an ordinary binary division, but when "the whole subtree consists only of `/`
+//!   and literal numbers" the result keeps the written form `a/b` (dart's
+//!   `SassNumber.withSlash`);
+//! - taking part in other arithmetic, variable assignment, parentheses, or being an operand
+//!   of another operation -> the written form is dropped.
 
 use std::borrow::Cow;
 use std::cell::Cell;
@@ -24,7 +27,7 @@ use crate::scss::modules::{self, Builtin};
 use crate::scss::value::{self, List, Map, Number, SassStr, Sep, Value};
 
 pub(crate) struct EvalError {
-    /// 合并文本里的绝对偏移（用于换算文件行列）。
+    /// Absolute offset in the merged text (used to map back to file line/column).
     pub(crate) at: usize,
     pub(crate) message: String,
 }
@@ -40,23 +43,24 @@ impl EvalError {
 
 type R<T> = Result<T, EvalError>;
 
-/// 用户函数递归上限（dart 自身在深层递归时也会栈溢出）。
+/// User function recursion limit (dart itself overflows the stack on deep recursion too).
 ///
-/// 取 64 而不是和 mixin 一样的 256：函数求值的栈帧更重（debug 构建里 128 层就
-/// 会超默认 2 MiB 线程栈），而真实工程（bootstrap/foundation）的递归深度
-/// 都在个位数。
+/// 64 rather than the 256 used for mixins: function evaluation has heavier stack frames
+/// (128 levels already exceed the default 2 MiB thread stack in a debug build), while real
+/// projects (bootstrap/foundation) recurse only a few levels deep.
 const MAX_CALL_DEPTH: usize = 64;
 
-/// 一次 `@include` / `@content` 的实参（已求值）。
+/// Arguments of one `@include` / `@content` (already evaluated).
 #[derive(Default)]
 pub(crate) struct Invocation {
     pub(crate) positional: Vec<Value>,
-    /// (归一化名, 值, 关键字名 span)。
+    /// (normalized name, value, keyword name span).
     pub(crate) keywords: Vec<(String, Value, Span)>,
 }
 
-/// Sass 标识符里 `-` 与 `_` 完全等价（变量 / 函数 / mixin 名都适用，命名空间不适用）：
-/// 符号表统一以 `-` 形式存 key，查找时也归一。
+/// In Sass identifiers `-` and `_` are completely equivalent (for variable / function /
+/// mixin names; not for namespaces): the symbol table always stores keys in the `-` form
+/// and normalizes on lookup.
 pub(crate) fn normalize_name(name: &str) -> String {
     if name.contains('_') {
         name.replace('_', "-")
@@ -65,14 +69,16 @@ pub(crate) fn normalize_name(name: &str) -> String {
     }
 }
 
-/// 有 `$rest` 时的遗留检查：多余的命名实参 + 「关键字 map 是否被读过」的共享标记。
+/// Leftover check when `$rest` exists: extra named arguments + the shared "was the keyword
+/// map read" marker.
 pub(crate) struct RestCheck {
     pub(crate) names: Vec<String>,
     pub(crate) accessed: Rc<Cell<bool>>,
 }
 
-/// 一层词法帧。`semi_global` 标记控制指令（`@if` 等）的作用域：赋值优先落到
-/// 已存在的变量而不是新建遮蔽（dart 的 `Environment.scope(semiGlobal: true)`）。
+/// One lexical frame. `semi_global` marks the scope of control directives (`@if` etc.):
+/// assignment prefers an existing variable over creating a new shadow (dart's
+/// `Environment.scope(semiGlobal: true)`).
 #[derive(Debug, Default, Clone)]
 pub(crate) struct Frame<'a> {
     vars: HashMap<String, Value>,
@@ -80,27 +86,30 @@ pub(crate) struct Frame<'a> {
     semi_global: bool,
 }
 
-/// 一个形参（`@mixin` 声明、`@include ... using` 与 `@function` 共用）。
+/// One parameter (shared by `@mixin` declarations, `@include ... using` and `@function`).
 #[derive(Clone, Debug)]
 pub(crate) struct Param<'a> {
     pub(crate) name: &'a str,
     pub(crate) default: Option<&'a ComponentValue<'a>>,
 }
 
-/// `@function` 定义。`scope`/`depth` 是定义处的词法位置：调用时把帧栈截到 `depth`，
-/// 函数体看不到调用方的局部变量（dart 的闭包语义）。
+/// A `@function` definition. `scope`/`depth` are the lexical position of the definition:
+/// a call truncates the frame stack to `depth`, so the body cannot see the caller's locals
+/// (dart's closure semantics).
 #[derive(Clone, Debug)]
 pub(crate) struct FunctionDef<'a> {
     pub(crate) params: Vec<Param<'a>>,
     pub(crate) rest: Option<&'a str>,
     pub(crate) body: &'a [Statement<'a>],
-    /// 定义处偏移（`@function` 整体）：`Function finished without @return.` 报这里。
+    /// Offset of the definition (the whole `@function`): `Function finished without
+    /// @return.` is reported here.
     pub(crate) at: usize,
     pub(crate) scope: usize,
     pub(crate) depth: usize,
 }
 
-/// 用户函数体执行的结果：正常走完（缺 `@return`）或提前返回。
+/// Result of executing a user function body: either ran to the end (missing `@return`) or
+/// returned early.
 pub(crate) enum Flow {
     Normal,
     Return(Value),
@@ -131,31 +140,34 @@ impl<'a> Scope<'a> {
     }
 }
 
-/// `@use` 得到的命名空间：用户模块（作用域编号）或内置模块。
+/// A namespace obtained from `@use`: a user module (scope id) or a built-in module.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum ModuleRef {
     User(usize),
     Builtin(Builtin),
 }
 
-/// `@use ... as *` 引入的模块（按引入顺序，后引入的优先）。
+/// Modules pulled in by `@use ... as *` (in import order; later ones win).
 ///
-/// 成员只在本作用域可见：查找未限定名时与自有成员一起参与解析，但**不进入**
-/// 本模块的对外成员表（`frames[0]`）——只有 `@forward` 才导出成员。
+/// Members are visible only in this scope: they take part in unqualified-name resolution
+/// together with the own members, but **do not enter** this module's exported member table
+/// (`frames[0]`) -- only `@forward` exports members.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum StarModule {
     User(usize),
     Builtin(Builtin),
 }
 
-/// 导出成员的种类：变量与非变量（函数与 mixin 共用一份 show/hide 名单）。
+/// The kind of an exported member: variable or non-variable (functions and mixins share one
+/// show/hide list).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum MemberKind {
     Var,
     Member,
 }
 
-/// `@forward ... show / hide` 的成员名单（名字已归一化，变量不带 `$`）。
+/// Member list of `@forward ... show / hide` (names already normalized, variables without
+/// `$`).
 #[derive(Clone, Debug, Default)]
 pub(crate) struct MemberFilter {
     pub(crate) vars: HashSet<String>,
@@ -171,79 +183,89 @@ impl MemberFilter {
     }
 }
 
-/// 一条 `@forward` 边：把目标模块的成员导出给下游，可选字面前缀与成员过滤。
+/// One `@forward` edge: exports the members of the target module downstream, with an
+/// optional literal prefix and member filter.
 ///
-/// 转发成员是**惰性**解析的：它们不进本模块的成员表，因此在本模块内不可见，
-/// 也让目标模块后续的改动能被下游看到。
+/// Forwarded members are resolved **lazily**: they do not enter this module's member table,
+/// so they are invisible inside this module, and later changes to the target module are
+/// visible downstream.
 #[derive(Clone, Debug)]
 pub(crate) struct ForwardEdge {
     pub(crate) scope: usize,
-    /// `@forward` 语句在合并文本里的起点（重复转发的报错位置）。
+    /// Start of the `@forward` statement in the merged text (location of duplicate-forward
+    /// errors).
     pub(crate) at: usize,
-    /// `as p-*` 的字面前缀（`p-`），拼在成员名之前。
+    /// The literal prefix of `as p-*` (`p-`), prepended to the member names.
     pub(crate) prefix: String,
     pub(crate) show: Option<MemberFilter>,
     pub(crate) hide: MemberFilter,
 }
 
 impl ForwardEdge {
-    /// 过滤看的是**加前缀之后**的对外名字（dart 1.93.2 实测）。
+    /// The filter looks at the exported name **after the prefix is added** (observed with
+    /// dart 1.93.2).
     pub(crate) fn allows(&self, kind: MemberKind, name: &str) -> bool {
         self.show.as_ref().is_none_or(|f| f.allows(kind, name)) && !self.hide.allows(kind, name)
     }
 
-    /// 对外名字去掉前缀后的内部名字。
+    /// The internal name after the prefix is removed from the exported name.
     pub(crate) fn strip<'n>(&self, name: &'n str) -> Option<&'n str> {
         name.strip_prefix(self.prefix.as_str())
     }
 }
 
-/// 成员名是否私有（`-` / `_` 开头：不导出、不可从模块外访问）。
+/// Whether a member name is private (starts with `-` / `_`: not exported and not
+/// accessible from outside the module).
 pub(crate) fn is_private(name: &str) -> bool {
     name.starts_with('-') || name.starts_with('_')
 }
 
-/// 一条待应用的 `with` 配置（`!default` 表示调用方可以覆盖）。
+/// A pending `with` configuration (`!default` means the caller may override it).
 #[derive(Clone, Debug)]
 pub(crate) struct PendingConfig {
     pub(crate) id: usize,
     pub(crate) name: String,
     pub(crate) value: Value,
-    /// 配置项在合并文本里的起点（报错定位）。
+    /// Start of the configuration entry in the merged text (error location).
     pub(crate) at: usize,
     pub(crate) default: bool,
 }
 
-/// `@forward` 链的递归上限（装配层的循环检测之外的兵底）。
+/// Recursion limit of the `@forward` chain (a last resort beyond the assembly layer's
+/// cycle detection).
 const MAX_FORWARD_DEPTH: usize = 32;
 
-/// 求值器：每个「作用域编号」拥有一套变量帧；`active` 决定当前使用哪一套。
+/// The evaluator: every "scope id" owns a set of variable frames, and `active` decides
+/// which set is currently in use.
 pub(crate) struct Evaluator<'a> {
     scopes: Vec<Scope<'a>>,
     namespaces: Vec<HashMap<String, (ModuleRef, u32)>>,
-    /// `@use ... as *` 引入的模块（按引入顺序，后引入的优先）。
+    /// Modules pulled in by `@use ... as *` (in import order; later ones win).
     star: Vec<Vec<StarModule>>,
-    /// 各作用域的 `@forward` 边（按声明顺序）。
+    /// The `@forward` edges of every scope (in declaration order).
     forwards: Vec<Vec<ForwardEdge>>,
-    /// 各模块待应用的 `with` 配置。
+    /// Pending `with` configurations of every module.
     pending: Vec<Vec<PendingConfig>>,
-    /// 所有配置项的 (id, 定位)：没人消费的在编译末尾报错。
+    /// (id, location) of all configuration entries: the ones nobody consumes are reported
+    /// at the end of the compilation.
     configs: Vec<(usize, usize)>,
     used_configs: HashSet<usize>,
     config_seq: usize,
-    /// 各作用域声明过的 mixin 名（`meta.mixin-exists()` 用）。
+    /// Mixin names declared in every scope (used by `meta.mixin-exists()`).
     mixins: Vec<HashSet<String>>,
     active: usize,
     base: usize,
-    /// 用户函数递归层数（上限见 `MAX_CALL_DEPTH`）。
+    /// User function recursion depth (see `MAX_CALL_DEPTH` for the limit).
     call_depth: usize,
-    /// 当前父选择器文本（`&` 的值）；根层是 `None`（dart：`null`）。
+    /// Text of the current parent selector (the value of `&`); `None` at the root level
+    /// (dart: `null`).
     parent_selector: Option<String>,
-    /// 当前是否在 mixin 体里，以及这次调用有没有传 content 块
-    /// （`content-exists()` 用）。
+    /// Whether we are currently inside a mixin body, and whether this call received a
+    /// content block (used by `content-exists()`).
     mixin_context: (bool, bool),
-    /// 合并后的真实源码。插值 `#{...}` 走的是「包装成 `a{b:…}`」的临时文本，
-    /// 其中的 span 需要 `base` 平移；而函数体来自真实 AST，必须用真实源码求值。
+    /// The merged real source. Interpolation `#{...}` goes through temporary text "wrapped as
+    /// `a{b:...}`", whose spans must be shifted by `base`; function bodies, on the other
+    /// hand, come from the real AST and must be evaluated against the real source.
     real: Option<&'a str>,
 }
 
@@ -277,7 +299,7 @@ impl<'a> Evaluator<'a> {
         self.parent_selector.clone()
     }
 
-    /// 进入/离开一条规则时更新 `&` 的值。
+    /// Update the value of `&` when entering/leaving a rule.
     pub(crate) fn set_parent_selector(&mut self, text: Option<String>) {
         self.parent_selector = text;
     }
@@ -290,20 +312,23 @@ impl<'a> Evaluator<'a> {
         self.active
     }
 
-    /// 当前是否处于模块的全局层（顶层，或只被 `@if` 之类的 semi-global 帧包着）：
-    /// `with` 配置只在这一层被变量声明消费。
+    /// Whether we are currently at a module's global layer (top level, or wrapped only in
+    /// semi-global frames such as `@if`): `with` configurations are only consumed by variable
+    /// declarations at this layer.
     pub(crate) fn at_module_global(&self) -> bool {
         self.scopes[self.active].frames[1..]
             .iter()
             .all(|frame| frame.semi_global)
     }
 
-    /// 当前作用域的帧数（`@include` 记录调用方环境深度用）。
+    /// Frame count of the current scope (used by `@include` to record the caller's
+    /// environment depth).
     pub(crate) fn frame_depth(&self) -> usize {
         self.scopes[self.active].frames.len()
     }
 
-    /// 进入一个块作用域（变量遮蔽外层）；文件顶层不调用（顶层变量是作用域的全局）。
+    /// Enter a block scope (variables shadow the outer ones); not called for the top level of
+    /// a file (top-level variables are the scope's globals).
     pub(crate) fn push_frame(&mut self, semi_global: bool) {
         self.scopes[self.active].frames.push(Frame {
             vars: HashMap::new(),
@@ -318,7 +343,8 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// 词法隔离：帧栈接回 / 摘下（`@include` / `@content` 要在定义环境里跑）。
+    /// Lexical isolation: reconnect / take off the frame stack (`@include` / `@content`
+    /// must run in the definition environment).
     pub(crate) fn take_frames(&mut self, scope: usize) -> Vec<Frame<'a>> {
         let index = scope.min(self.scopes.len() - 1);
         std::mem::take(&mut self.scopes[index].frames)
@@ -329,7 +355,8 @@ impl<'a> Evaluator<'a> {
         self.scopes[index].frames = frames;
     }
 
-    /// 把帧栈截到 `depth`（词法闭包的定义环境），返回被摘下的尾部。
+    /// Truncate the frame stack to `depth` (the definition environment of the lexical
+    /// closure) and return the tail that was taken off.
     fn truncate_frames(&mut self, scope: usize, depth: usize) -> Vec<Frame<'a>> {
         let mut frames = self.take_frames(scope);
         let tail = frames.split_off(depth.min(frames.len()));
@@ -343,7 +370,8 @@ impl<'a> Evaluator<'a> {
         self.put_frames(scope, frames);
     }
 
-    /// `@function`：登记到当前帧（函数体里的声明只活在这次调用里）。
+    /// `@function`: register in the current frame (declarations inside a function body only
+    /// live for that call).
     pub(crate) fn define_function(&mut self, name: &str, def: FunctionDef<'a>) {
         let name = normalize_name(name);
         if let Some(frame) = self.scopes[self.active].frames.last_mut() {
@@ -351,8 +379,9 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// 用户函数查找：先找自己的帧（从内向外），再找 `@use ... as *` 引入的模块
-    /// （后引入的优先）。星号模块的成员只在本作用域可见，不对外导出。
+    /// User function lookup: first the own frames (from the inside out), then the modules
+    /// pulled in by `@use ... as *` (later ones win). Members of a star module are visible
+    /// only in this scope and are not exported.
     pub(crate) fn find_function(&self, name: &str) -> Option<FunctionDef<'a>> {
         let name = normalize_name(name);
         if let Some(def) = self.scopes[self.active]
@@ -372,7 +401,8 @@ impl<'a> Evaluator<'a> {
             })
     }
 
-    /// 命名空间（`@use` 模块）里的函数：只看模块的全局帧。
+    /// A function inside a namespace (`@use` module): only the module's global frame is
+    /// consulted.
     pub(crate) fn find_module_function(
         &self,
         namespace: &str,
@@ -384,7 +414,8 @@ impl<'a> Evaluator<'a> {
         self.export_function(scope, name)
     }
 
-    /// 参数绑定：永远写当前帧（不能覆盖外层同名变量）。
+    /// Parameter binding: always writes the current frame (it must not override an outer
+    /// variable of the same name).
     pub(crate) fn declare_local(&mut self, name: &str, value: Value) {
         let name = normalize_name(name);
         if let Some(frame) = self.scopes[self.active].frames.last_mut() {
@@ -398,8 +429,8 @@ impl<'a> Evaluator<'a> {
             .map(|(module, _)| *module)
     }
 
-    /// 用户模块的作用域编号（`@import` 的 mixin 导入、`ns.mixin` 用）；
-    /// 内置模块没有用户作用域。
+    /// Scope id of a user module (used for mixins imported by `@import` and for `ns.mixin`);
+    /// built-in modules have no user scope.
     pub(crate) fn namespace_scope(&self, namespace: &str) -> Option<usize> {
         match self.namespace_module(namespace)? {
             ModuleRef::User(scope) => Some(scope),
@@ -407,16 +438,18 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// 模块命名空间是否存在（内置模块也算）。
+    /// Whether a module namespace exists (built-in modules count as well).
     pub(crate) fn has_namespace(&self, namespace: &str) -> bool {
         self.namespaces[self.active].contains_key(namespace)
     }
 
-    /// 变量声明（dart-sass 语义）：
-    /// - `!default`：仅当变量未定义或值为 `null` 时赋值；
-    /// - `!global`：写作用域全局帧；
-    /// - 普通赋值：写「已声明它的最近块帧」（更深块里的赋值能改到外层块的局部
-    ///   变量），都不存在时在当前帧声明 —— 全局帧只有本层赋值才会改。
+    /// Variable declaration (dart-sass semantics):
+    /// - `!default`: assign only when the variable is undefined or `null`;
+    /// - `!global`: write the scope's global frame;
+    /// - plain assignment: write "the nearest block frame that already declared it" (an
+    ///   assignment in a deeper block can change an outer block's local variable); when none
+    ///   exists, declare it in the current frame -- the global frame is only changed by an
+    ///   assignment at that layer.
     pub(crate) fn define(&mut self, name: &str, value: Value, default: bool, global: bool) {
         let name = &normalize_name(name);
         let value = value.without_slash();
@@ -432,8 +465,10 @@ impl<'a> Evaluator<'a> {
             scope.frames[0].vars.insert(name.to_string(), value);
             return;
         }
-        // 向上找「已经声明」的帧并覆值；全局帧只有在「根本身或上面的帧全是 @if 帧」时
-        // 才算数（dart 实测：根层 `@if` 会改全局，规则里的 `@if` 只会新建局部）。
+        // Walk up to the frame that "already declared" it and overwrite its value; the global
+        // frame only counts when "the root itself or all frames above it are @if frames"
+        // (observed with dart: an `@if` at the root layer changes the global, an `@if` inside
+        // a rule only creates a local).
         let from = if scope.frames[1..].iter().all(|f| f.semi_global) {
             0
         } else {
@@ -452,10 +487,12 @@ impl<'a> Evaluator<'a> {
         scope.frames[last].vars.insert(name.to_string(), value);
     }
 
-    /// 变量查找：先找自己的帧，再找 `@use ... as *` 引入的模块（后引入的优先）。
+    /// Variable lookup: first the own frames, then the modules pulled in by
+    /// `@use ... as *` (later ones win).
     ///
-    /// 星号模块的变量是**懒读取**的：既不复制进本模块的全局帧（否则会顺着
-    /// `@use this as *` 泄漏给下游），也能看到模块后续的改动。
+    /// The variables of a star module are **read lazily**: they are not copied into this
+    /// module's global frame (which would leak them downstream through `@use this as *`),
+    /// and later changes to the module are still visible.
     pub(crate) fn lookup(&self, name: &str) -> Option<Cow<'_, Value>> {
         if let Some(value) = self.scopes[self.active].get(name) {
             return Some(Cow::Borrowed(value));
@@ -470,7 +507,8 @@ impl<'a> Evaluator<'a> {
             })
     }
 
-    /// `m.$var`：用户模块读全局帧，内置模块读静态变量表。
+    /// `m.$var`: a user module reads its global frame, a built-in module its static variable
+    /// table.
     pub(crate) fn module_variable(&self, namespace: &str, name: &str) -> Option<Option<Value>> {
         match self.namespace_module(namespace)? {
             ModuleRef::User(scope) => Some(self.export_var(scope, name)),
@@ -480,8 +518,9 @@ impl<'a> Evaluator<'a> {
 
     fn insert_namespace(&mut self, namespace: &str, module: ModuleRef, file: u32) -> R<()> {
         let table = &mut self.namespaces[self.active];
-        // 重名已由装配层按文件静态拦下；这里的重复声明（同一个文件被 `@import`
-        // 两次）静默保留第一份。
+        // Duplicate names have already been rejected statically per file by the assembly
+        // layer; the duplicate declaration here (the same file imported twice by `@import`)
+        // silently keeps the first one.
         table.entry(namespace.to_string()).or_insert((module, file));
         Ok(())
     }
@@ -499,7 +538,8 @@ impl<'a> Evaluator<'a> {
         self.insert_namespace(namespace, ModuleRef::Builtin(module), file)
     }
 
-    /// 登记一条 `@forward` 边（成员惰性解析，不复制进本模块的成员表）。
+    /// Register a `@forward` edge (members are resolved lazily and are not copied into this
+    /// module's member table).
     pub(crate) fn add_forward(&mut self, scope: usize, edge: ForwardEdge) {
         self.forwards[scope].push(edge);
     }
@@ -512,9 +552,10 @@ impl<'a> Evaluator<'a> {
         self.scopes.len()
     }
 
-    /// 登记一条 `with` 配置（`default` = `@forward ... with (... !default)`）。
+    /// Register a `with` configuration (`default` = `@forward ... with (... !default)`).
     ///
-    /// 返回冲突位置：同一个变量已经有非 `!default` 配置时再配一次就报错。
+    /// Returns the conflict location: configuring the same variable again while a non-default
+    /// configuration exists is an error.
     pub(crate) fn configure(
         &mut self,
         scope: usize,
@@ -538,23 +579,26 @@ impl<'a> Evaluator<'a> {
         )
     }
 
-    /// 把一条配置放进目标模块（已存在同名配置时按 `!default` 规则合并）。
+    /// Put a configuration into the target module (merged by the `!default` rules when a
+    /// configuration of the same name already exists).
     pub(crate) fn push_config(&mut self, scope: usize, entry: PendingConfig) -> Result<(), usize> {
         let list = &mut self.pending[scope];
         let Some(existing) = list.iter_mut().find(|e| e.name == entry.name) else {
             list.push(entry);
             return Ok(());
         };
-        // 同一条配置沿多条转发边下传：目标里已有的就是它自己。
+        // The same configuration travelling down several forward edges: what the target
+        // already holds is itself.
         if existing.id == entry.id {
             return Ok(());
         }
         match (existing.default, entry.default) {
-            // 已有硬配置：新的默认值被忽略。
+            // A hard configuration already exists: the new default is ignored.
             (false, true) => {
                 self.used_configs.insert(entry.id);
             }
-            // 默认值被硬配置覆盖：旧的那条不再报错。
+            // A default value is overridden by a hard configuration: the old entry no longer
+            // reports an error.
             (true, false) => {
                 self.used_configs.insert(existing.id);
                 *existing = entry;
@@ -562,13 +606,14 @@ impl<'a> Evaluator<'a> {
             (true, true) => {
                 self.used_configs.insert(entry.id);
             }
-            // 两个硬配置：后到的那个报「不是 !default 变量」。
+            // Two hard configurations: the later one reports "isn't a !default variable".
             (false, false) => return Err(entry.at),
         }
         Ok(())
     }
 
-    /// 取走当前模块的同名配置值（声明处消费）。
+    /// Take the configuration of the same name for the current module (consumed at the
+    /// declaration).
     pub(crate) fn take_config(&mut self, name: &str) -> Option<Value> {
         let name = normalize_name(name);
         let used = self.used_configs.clone();
@@ -581,7 +626,8 @@ impl<'a> Evaluator<'a> {
         Some(entry.value)
     }
 
-    /// 同名配置还没被消费时，非 `!default` 声明要报错（返回配置位置）。
+    /// When the configuration of the same name has not been consumed yet, a non-`!default`
+    /// declaration is an error (returns the configuration location).
     pub(crate) fn config_conflict(&self, name: &str) -> Option<usize> {
         let name = normalize_name(name);
         self.pending[self.active]
@@ -590,18 +636,21 @@ impl<'a> Evaluator<'a> {
             .map(|e| e.at)
     }
 
-    /// 某条配置是否已经在链上被消费（`@forward` 下传时跳过）。
+    /// Whether a configuration has already been consumed along the chain (skipped when
+    /// passed down by `@forward`).
     pub(crate) fn config_used(&self, id: usize) -> bool {
         self.used_configs.contains(&id)
     }
 
-    /// 当前模块待应用的配置（下传时是「抄一份」，配置本体留在本模块等自己的
-    /// `!default` 声明消费——dart 的 `Configuration` 是共享对象）。
+    /// The configurations pending for the current module (passing down is a "copy": the
+    /// configuration itself stays in this module for its own `!default` declaration to
+    /// consume -- dart's `Configuration` is a shared object).
     pub(crate) fn pending_configs(&self, scope: usize) -> Vec<PendingConfig> {
         self.pending[scope].clone()
     }
 
-    /// 编译末尾检查：有没有配置项没人消费（dart 报在配置处）。
+    /// End-of-compilation check: whether any configuration entry was consumed by nobody
+    /// (dart reports at the configuration).
     pub(crate) fn unresolved_config(&self) -> Option<usize> {
         self.configs
             .iter()
@@ -609,7 +658,8 @@ impl<'a> Evaluator<'a> {
             .map(|(_, at)| *at)
     }
 
-    /// 模块对外成员（自己的全局帧 + `@forward` 链）里读变量。
+    /// Read a variable from the module's exported members (own global frame + `@forward`
+    /// chain).
     pub(crate) fn export_var(&self, scope: usize, name: &str) -> Option<Value> {
         self.export_var_at(scope, name, 0)
     }
@@ -637,7 +687,7 @@ impl<'a> Evaluator<'a> {
         })
     }
 
-    /// 模块对外成员里的函数。
+    /// A function among the module's exported members.
     pub(crate) fn export_function(&self, scope: usize, name: &str) -> Option<FunctionDef<'a>> {
         self.export_function_at(scope, name, 0)
     }
@@ -670,7 +720,7 @@ impl<'a> Evaluator<'a> {
         })
     }
 
-    /// 模块对外成员里的变量名（`meta.module-variables()`）。
+    /// Variable names among the module's exported members (`meta.module-variables()`).
     pub(crate) fn export_var_names(&self, scope: usize) -> Vec<(String, Value)> {
         let mut out = HashMap::new();
         self.collect_export_vars(scope, 0, &mut out);
@@ -702,7 +752,8 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// 变量最终定义在哪个模块（`@forward` 重复检测用）。
+    /// The module a variable is finally defined in (used for `@forward` duplicate
+    /// detection).
     pub(crate) fn export_var_origin(&self, scope: usize, name: &str) -> Option<(usize, String)> {
         self.export_var_origin_at(scope, name, 0)
     }
@@ -734,7 +785,8 @@ impl<'a> Evaluator<'a> {
         })
     }
 
-    /// 函数最终定义在哪个模块（`@forward` 重复检测用）。
+    /// The module a function is finally defined in (used for `@forward` duplicate
+    /// detection).
     pub(crate) fn export_function_origin(
         &self,
         scope: usize,
@@ -770,7 +822,7 @@ impl<'a> Evaluator<'a> {
         })
     }
 
-    /// 模块对外成员里的函数名（`meta.module-functions()`）。
+    /// Function names among the module's exported members (`meta.module-functions()`).
     pub(crate) fn export_function_names(&self, scope: usize) -> Vec<String> {
         let mut out = HashSet::new();
         self.collect_export_functions(scope, 0, &mut out);
@@ -802,7 +854,8 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// 模块对外成员里的 mixin 名（`mixin-exists()` 用；mixin 本体在 `Converter`）。
+    /// Mixin names among the module's exported members (used by `mixin-exists()`; the mixin
+    /// bodies live in `Converter`).
     pub(crate) fn export_mixin_name(&self, scope: usize, name: &str) -> bool {
         self.export_mixin_name_at(scope, name, 0)
     }
@@ -824,7 +877,8 @@ impl<'a> Evaluator<'a> {
         })
     }
 
-    /// `@use ... as *` 的用户模块：成员参与本作用域的无限定名解析，但不导出。
+    /// A user module pulled in by `@use ... as *`: its members take part in this scope's
+    /// unqualified-name resolution but are not exported.
     pub(crate) fn import_star_module(&mut self, scope: usize) {
         let star = &mut self.star[self.active];
         let module = StarModule::User(scope);
@@ -833,7 +887,8 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// `@use "sass:xxx" as *`：成员表参与无限定名解析（变量由 `lookup` 读取）。
+    /// `@use "sass:xxx" as *`: the member table takes part in unqualified-name resolution
+    /// (variables are read by `lookup`).
     pub(crate) fn import_builtin_star(&mut self, module: Builtin) {
         let star = &mut self.star[self.active];
         let module = StarModule::Builtin(module);
@@ -842,7 +897,8 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// 星号引入的用户模块作用域（后引入的在前），`@include` 的无限定名查找用。
+    /// Scopes of user modules pulled in with a star (later ones first), used for the
+    /// unqualified lookup of `@include`.
     pub(crate) fn star_scopes(&self) -> impl Iterator<Item = usize> + '_ {
         self.star[self.active]
             .iter()
@@ -853,8 +909,9 @@ impl<'a> Evaluator<'a> {
             })
     }
 
-    /// `as *` 的内置模块成员：按引入顺序倒查（后引入的优先），且**先于**全局内置函数表
-    /// ——dart 实测 `@use "sass:color" as *` 会让 `lighten()` 报「不在模块里」。
+    /// Members of `as *` built-in modules: searched in reverse import order (later ones win),
+    /// and **before** the global built-in function table -- observed with dart:
+    /// `@use "sass:color" as *` makes `lighten()` report "isn't in the module".
     fn star_member(&self, name: &str) -> Option<Builtin> {
         self.star[self.active]
             .iter()
@@ -865,37 +922,40 @@ impl<'a> Evaluator<'a> {
             })
     }
 
-    /// 登记 mixin 名（`meta.mixin-exists()`）。
+    /// Register a mixin name (used by `meta.mixin-exists()`).
     pub(crate) fn define_mixin(&mut self, name: &str) {
         self.mixins[self.active].insert(normalize_name(name));
     }
 
-    /// 当前 mixin 调用是否带 content 块（`@include m {}` 的 `{}` 也算）。
+    /// Whether the current mixin call carries a content block (the `{}` of
+    /// `@include m {}` counts too).
     pub(crate) fn set_mixin_context(&mut self, in_mixin: bool, has_content: bool) {
         self.mixin_context = (in_mixin, has_content);
     }
 
     // -----------------------------------------------------------------------
-    // 对外入口
+    // Public entry points
     // -----------------------------------------------------------------------
 
-    /// 声明值 / 任意表达式序列。
+    /// A declaration value / an arbitrary expression sequence.
     pub(crate) fn eval_value(&mut self, src: &str, comps: &[ComponentValue]) -> R<Value> {
         self.eval_flat(src, comps)
     }
 
-    /// 单个组件值。
+    /// A single component value.
     pub(crate) fn eval_component(&mut self, src: &str, comp: &ComponentValue) -> R<Value> {
         self.eval_comp(src, comp)
     }
 
-    /// 从文本求值（选择器 / media prelude 的 `#{}` 内部）：内部包一层
-    /// `a{b:<text>}` 重新交给 oxc 词法，错误偏移再换算回原文。
+    /// Evaluate from text (inside `#{}` of a selector / media prelude): the text is wrapped
+    /// in `a{b:<text>}` and handed back to the oxc lexer, and error offsets are mapped back
+    /// to the original text.
     pub(crate) fn eval_text(&mut self, text: &str, at: usize) -> R<Value> {
         const PREFIX: usize = 4; // "a{b:"
         let wrapped = format!("a{{b:{text}}}");
         let alloc = Allocator::default();
-        // 源文件即使是 `.sass`，值/选择器文本也已折成 SCSS 形态，这里固定按 SCSS 解析。
+        // Even when the source file is `.sass`, the value/selector text has already been
+        // folded into SCSS form, so it is parsed as SCSS here.
         let mut parser = ParserBuilder::new(&alloc, &wrapped)
             .syntax(Syntax::Scss)
             .build();
@@ -925,7 +985,7 @@ impl<'a> Evaluator<'a> {
         result
     }
 
-    /// 文本里的 `#{...}` 插值（结果为无引号文本）。
+    /// `#{...}` interpolation in text (the result is unquoted text).
     pub(crate) fn interpolate(&mut self, text: &str, at: usize) -> R<String> {
         let bytes = text.as_bytes();
         let mut out = String::with_capacity(text.len());
@@ -974,7 +1034,7 @@ impl<'a> Evaluator<'a> {
                 i = j + 1;
                 continue;
             }
-            let ch = text[i..].chars().next().expect("边界安全");
+            let ch = text[i..].chars().next().expect("boundary safe");
             out.push(ch);
             i += ch.len_utf8();
         }
@@ -982,7 +1042,7 @@ impl<'a> Evaluator<'a> {
     }
 
     // -----------------------------------------------------------------------
-    // 表达式
+    // Expressions
     // -----------------------------------------------------------------------
 
     fn eval_expr(&mut self, src: &str, expr: &ExprKind) -> R<Value> {
@@ -1050,7 +1110,7 @@ impl<'a> Evaluator<'a> {
                     values.push(self.eval_expr(src, item)?);
                 }
                 if values.len() == 1 && !bracketed {
-                    return Ok(values.pop().expect("非空"));
+                    return Ok(values.pop().expect("non-empty"));
                 }
                 Ok(Value::List(List {
                     items: values,
@@ -1091,10 +1151,11 @@ impl<'a> Evaluator<'a> {
                 }
                 SassModuleMemberName::Ident(_) => Err(EvalError::new(
                     self.base + q.span.start,
-                    "SCSS 特性尚未实现（S2）: 模块成员引用",
+                    "SCSS feature not implemented yet (S2): module member reference",
                 )),
             },
-            // `&` 在表达式里是当前父选择器（根层是 null）：`if(&, "&", "")` 靠它。
+            // `&` in an expression is the current parent selector (null at the root layer):
+            // `if(&, "&", "")` relies on it.
             ComponentValue::SassParentSelector(_) => Ok(match &self.parent_selector {
                 Some(text) => Value::Str(value::SassStr::unquoted(text.clone())),
                 None => Value::Null,
@@ -1103,13 +1164,15 @@ impl<'a> Evaluator<'a> {
             ComponentValue::InterpolableStr(s) => self.eval_str(src, s),
             ComponentValue::Function(f) => self.eval_function(src, f),
             ComponentValue::Url(u) => self.eval_url(src, u),
-            // oxc 把 CSS 数学函数（`round()` / `mod()` …）的实参读成 `Calc` 节点；
-            // 对 1.35.2 的 Sass 内置函数来说它就是一个普通表达式（`round(1/3)` = 0）。
+            // oxc reads the arguments of CSS math functions (`round()` / `mod()` …) as `Calc`
+            // nodes; for the Sass built-ins of 1.35.2 it is just an ordinary expression
+            // (`round(1/3)` = 0).
             ComponentValue::Calc(c) => {
                 let text = src.get(c.span.start..c.span.end).unwrap_or("");
                 self.eval_text(text, c.span.start)
             }
-            // `min()`/`max()` 的实参被 oxc 读成 Calc 语法树：括号里仍是普通表达式。
+            // The arguments of `min()`/`max()` are read by oxc as a Calc syntax tree: what is
+            // inside the parentheses is still an ordinary expression.
             ComponentValue::CalcParenthesized(p) => {
                 let value = self.eval_comp(src, &p.expr)?;
                 Ok(value.without_slash())
@@ -1118,7 +1181,8 @@ impl<'a> Evaluator<'a> {
                 let value = self.eval_flat(src, std::slice::from_ref(&p.expr))?;
                 Ok(value.without_slash())
             }
-            // 裸表达式节点（`(10px/2px)` 的内层、函数实参等）走同一套分组解析。
+            // Bare expression nodes (the inner part of `(10px/2px)`, function arguments, …)
+            // go through the same grouping parser.
             ComponentValue::SassBinaryExpression(_) | ComponentValue::SassUnaryExpression(_) => {
                 self.eval_flat(src, std::slice::from_ref(comp))
             }
@@ -1139,8 +1203,9 @@ impl<'a> Evaluator<'a> {
                 }
                 Ok(Value::Map(Map { entries }))
             }
-            // oxc 的 `SassList` 只是「非逗号分隔的一串」：处理掉里面的裸 `/`
-            // （`#{10 / 4}` 的元素是 `10 | / | 4`）、一元与二元表达式。
+            // oxc's `SassList` is just "a sequence not separated by commas": handle the bare
+            // `/` inside it (the elements of `#{10 / 4}` are `10 | / | 4`), along with unary
+            // and binary expressions.
             ComponentValue::SassList(list) if !matches!(&list.comma_spans, Some(spans) if !spans.is_empty()) => {
                 self.eval_flat(src, &list.elements)
             }
@@ -1150,7 +1215,7 @@ impl<'a> Evaluator<'a> {
                     items.push(self.eval_comp(src, element)?);
                 }
                 if items.len() == 1 {
-                    return Ok(items.pop().expect("非空"));
+                    return Ok(items.pop().expect("non-empty"));
                 }
                 Ok(Value::List(List {
                     items,
@@ -1172,7 +1237,7 @@ impl<'a> Evaluator<'a> {
                 Ok(value)
             }
             ComponentValue::Dimension(d) => {
-                // `10px-5px` 在 SCSS 里是减法（单位不会以 `-数字` 开头）。
+                // `10px-5px` is a subtraction in SCSS (a unit never starts with `-digit`).
                 if let Some(pos) = unit_split_point(d.unit.name) {
                     let left = value::from_component(src, comp).map_err(|message| {
                         EvalError::new(self.base + comp.span().start, message)
@@ -1194,11 +1259,11 @@ impl<'a> Evaluator<'a> {
                 .map_err(|message| EvalError::new(self.base + comp.span().start, message)),
             ComponentValue::SassArbitraryArgument(a) => Err(EvalError::new(
                 self.base + a.span.start,
-                "SCSS 特性尚未实现（S2）: 展开实参 `...`",
+                "SCSS feature not implemented yet (S2): spread argument `...`",
             )),
             ComponentValue::SassKeywordArgument(a) => Err(EvalError::new(
                 self.base + a.span.start,
-                "SCSS 特性尚未实现（S1）: 关键字实参",
+                "SCSS feature not implemented yet (S1): keyword argument",
             )),
             other => Ok(Value::Raw(
                 src.get(other.span().start..other.span().end)
@@ -1208,7 +1273,8 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// 组件序列 → 表达式（摊平成 token 后按 dart 优先级重分组）。
+    /// Component sequence -> expression (flattened into tokens, then regrouped by dart's
+    /// precedence).
     fn eval_flat(&mut self, src: &str, comps: &[ComponentValue]) -> R<Value> {
         let mut toks = Vec::new();
         for comp in comps {
@@ -1248,7 +1314,7 @@ impl<'a> Evaluator<'a> {
                         SassInterpolatedIdentElement::Placeholder(p) => {
                             return Err(EvalError::new(
                                 self.base + p.span.start,
-                                "SCSS 特性尚未实现（S1）: 模板占位符",
+                                "SCSS feature not implemented yet (S1): template placeholder",
                             ));
                         }
                     }
@@ -1257,7 +1323,7 @@ impl<'a> Evaluator<'a> {
             }
             _ => Err(EvalError::new(
                 self.base + ident_span(ident).start,
-                "SCSS 特性尚未实现（S1）: less 风格插值",
+                "SCSS feature not implemented yet (S1): less-style interpolation",
             )),
         }
     }
@@ -1282,7 +1348,7 @@ impl<'a> Evaluator<'a> {
             }
             _ => Err(EvalError::new(
                 self.base + str_span(s).start,
-                "SCSS 特性尚未实现（S1）: less 风格字符串插值",
+                "SCSS feature not implemented yet (S1): less-style string interpolation",
             )),
         }
     }
@@ -1294,7 +1360,7 @@ impl<'a> Evaluator<'a> {
             .and_then(|rest| rest.strip_suffix(')'))
             .unwrap_or("");
         let trimmed = inner.trim();
-        // `url($x)`：dart-sass 把它当 SassScript 表达式求值。
+        // `url($x)`: dart-sass evaluates it as a SassScript expression.
         if trimmed.starts_with('$') {
             let value = self.eval_text(trimmed, url.span.start + 4)?;
             let text = value
@@ -1302,8 +1368,8 @@ impl<'a> Evaluator<'a> {
                 .map_err(|message| EvalError::new(self.base + url.span.start, message))?;
             return Ok(Value::Str(value::SassStr::unquoted(format!("url({text})"))));
         }
-        // dart 把 `url(...)` 解析成一个**不加引号的字符串**：`type-of(url(x))` 是
-        // `string`，`str-slice(url(x), 1, 1)` 是 `u`（bootstrap 的 `escape-svg()` 依赖它）。
+        // dart parses `url(...)` into an **unquoted string**: `type-of(url(x))` is `string`
+        // and `str-slice(url(x), 1, 1)` is `u` (bootstrap's `escape-svg()` relies on it).
         let rewritten = value::rewrite_raw(src, url.span);
         let interpolated = self.interpolate(&rewritten, url.span.start)?;
         Ok(Value::Str(value::SassStr::unquoted(interpolated)))
@@ -1333,8 +1399,9 @@ impl<'a> Evaluator<'a> {
         };
         let lower = name.to_ascii_lowercase();
 
-        // calc 系列内部不是 SassScript：只做插值。dart 只认 `calc` 与
-        // 带厂商前缀的 `-webkit-calc`（`rem-calc` 之类的用户函数名不算）。
+        // The inside of the calc family is not SassScript: only interpolation applies. dart
+        // only recognizes `calc` and the vendor-prefixed `-webkit-calc` (user function names
+        // such as `rem-calc` do not count).
         if lower == "calc" || (lower.starts_with('-') && lower.ends_with("-calc")) {
             let raw = src.get(f.span.start..f.span.end).unwrap_or("");
             let inner = raw
@@ -1342,12 +1409,15 @@ impl<'a> Evaluator<'a> {
                 .and_then(|start| raw.rfind(')').map(|end| (start + 1, end)))
                 .map(|(s, e)| &raw[s..e])
                 .unwrap_or("");
-            // calc 内部是计算式，但 **SassScript 仍然生效**：`$var`、用户函数、
-            // `#{}` 都要求值后内联（element-plus 的 `calc(getCssVar(...) - 1)`）。
+            // The inside of calc is a calculation, but **SassScript still applies**: `$var`,
+            // user functions and `#{}` must all be evaluated and inlined (element-plus's
+            // `calc(getCssVar(...) - 1)`).
             let inner = self.calc_script(inner, f.span.start + 1)?;
-            // calc 的内容按计算式重新序列化：引号统一成 dart 的写法。
+            // The content of calc is re-serialized as a calculation: quotes are normalized to
+            // dart's style.
             let inner = value::collapse_ws(&value::requote_strings(&inner));
-            // 常数化简：插值结果是不透明原子，旁边的数字仍可以合并。
+            // Constant folding: an interpolation result is an opaque atom, but the numbers
+            // next to it can still be merged.
             match fold_calc(&inner) {
                 CalcFold::Number(number) => return Ok(Value::Number(number)),
                 CalcFold::Text(text) => return Ok(Value::Raw(format!("{lower}({text})"))),
@@ -1359,14 +1429,16 @@ impl<'a> Evaluator<'a> {
                 }
             }
         }
-        // `min()` / `max()` / `clamp()` 优先按纯 CSS 数学函数解析（dart 的计算式语义）。
-        // 现代 dart 只认这三个函数名本身：`-webkit-min` 是未知函数（原样透传）。
+        // `min()` / `max()` / `clamp()` are parsed as plain CSS math functions first (dart's
+        // calculation semantics). Modern dart only recognizes these three names themselves:
+        // `-webkit-min` is an unknown function (passed through as is).
         if matches!(lower.as_str(), "min" | "max" | "clamp") {
             if let Some(value) = self.css_math_call(src, f, &lower)? {
                 return Ok(value);
             }
         }
-        // `progid:...` 是 IE filter 的原文写法：整体透传（空白保留），只规范化字符串引号。
+        // `progid:...` is the verbatim form of an IE filter: passed through as is (whitespace
+        // kept), only the quotes of strings are normalized.
         if lower.contains("progid") {
             let raw = src.get(f.span.start..f.span.end).unwrap_or("");
             let raw = self.interpolate(raw, f.span.start)?;
@@ -1374,14 +1446,15 @@ impl<'a> Evaluator<'a> {
                 &raw,
             ))));
         }
-        // 其余原文参数（`alpha(opacity=65)`）：`=` 两侧不留空格（dart-sass 实测）。
+        // Other verbatim arguments (`alpha(opacity=65)`): no spaces around `=` (observed with
+        // dart-sass).
         if value::has_raw_args(&f.args) {
             let raw = value::rewrite_raw(src, f.span);
             let raw = self.interpolate(&raw, f.span.start)?;
             return Ok(Value::Raw(value::strip_eq_spaces(&raw)));
         }
 
-        // `if($cond, $a, $b)` 惰性求值。
+        // `if($cond, $a, $b)` is evaluated lazily.
         if normalize_name(&lower) == "if" {
             let groups = split_args(src, &f.args);
             if groups.len() == 3 {
@@ -1390,7 +1463,8 @@ impl<'a> Evaluator<'a> {
             }
         }
 
-        // 需要求值器上下文的元函数（变量/函数存在性、一等函数）。
+        // Metafunctions that need the evaluator context (variable/function existence,
+        // first-class functions).
         match normalize_name(&lower).as_str() {
             "variable-exists" | "global-variable-exists" | "function-exists" | "mixin-exists" => {
                 return self.meta_exists(&lower, src, &f.args, f.span.start);
@@ -1404,21 +1478,24 @@ impl<'a> Evaluator<'a> {
             _ => {}
         }
 
-        // 用户函数优先于同名内置函数（dart 实测：`@function rgb()` 能盖掉内置 rgb）。
+        // User functions take precedence over a built-in of the same name (observed with
+        // dart: `@function rgb()` can override the built-in rgb).
         if let Some(def) = self.find_function(&name) {
             let inv = self.eval_invocation(src, &f.args)?;
             return self.call_function(def, src, inv, f.span.start);
         }
 
         let inv = self.eval_invocation(src, &f.args)?;
-        // 函数名同样 `-`/`_` 等价（`map_get` = `map-get`）；未知函数仍按原拼写透传。
+        // Function names are `-`/`_` equivalent as well (`map_get` = `map-get`); unknown
+        // functions are still passed through with their original spelling.
         let keywords = inv
             .keywords
             .iter()
             .map(|(name, value, _)| (name.clone(), value.clone()))
             .collect::<Vec<_>>();
-        // `@use "sass:xxx" as *` 的成员**优先于**全局内置函数：`@use "sass:color" as *`
-        // 之后 `lighten()` 会报「不在 sass:color 模块里」（1.35.2 实测）。
+        // Members of `@use "sass:xxx" as *` are **higher priority than** the global built-in
+        // functions: after `@use "sass:color" as *`, `lighten()` reports "isn't in the
+        // sass:color module" (observed with 1.35.2).
         let member = normalize_name(&lower);
         if let Some(module) = self.star_member(&member) {
             return modules::call(module, &member, &inv.positional, &keywords)
@@ -1435,7 +1512,7 @@ impl<'a> Evaluator<'a> {
                 sep: Sep::Comma,
                 bracketed: false,
             }),
-            1 => inv.positional.into_iter().next().expect("长度 1"),
+            1 => inv.positional.into_iter().next().expect("length 1"),
             _ => Value::List(List {
                 items: inv.positional,
                 sep: Sep::Comma,
@@ -1448,11 +1525,12 @@ impl<'a> Evaluator<'a> {
         }))
     }
 
-    /// `meta.calc-name($calc)` / `meta.calc-args($calc)`（1.93.2）。
+    /// `meta.calc-name($calc)` / `meta.calc-args($calc)` (1.93.2).
     ///
-    /// 我们的 calc 家族是 `Value::Raw("calc(...)")`：`calc-name` 取函数名（带引号
-    /// 字符串），`calc-args` 取实参——`calc` 整体算一个计算式，其余按顶层逗号拆开
-    /// 并重新求值（这样 `min(1px, 2%)` 的 `1px` 仍是带单位的数）。
+    /// Our calc family is `Value::Raw("calc(...)")`: `calc-name` takes the function name (as
+    /// a quoted string) and `calc-args` takes the arguments -- `calc` as a whole counts as one
+    /// calculation, while the rest is split on top-level commas and re-evaluated (so the `1px`
+    /// of `min(1px, 2%)` stays a number with a unit).
     fn calc_parts(
         &mut self,
         which: &str,
@@ -1467,7 +1545,7 @@ impl<'a> Evaluator<'a> {
         let bound = Args::new(&["calc"], &inv.positional, &keywords).map_err(fail)?;
         let text = match bound.req(0).map_err(|m| EvalError::new(base + at, m))? {
             Value::Raw(text) => text.clone(),
-            // `min()` 保留成不带引号的字符串；`clamp()` 是 CSS 函数透传。
+            // `min()` is kept as an unquoted string; `clamp()` is a CSS function passthrough.
             Value::Str(text) if !text.quoted => text.text.clone(),
             Value::Function(function) => {
                 format!("{}({})", function.name, function.args.inspect())
@@ -1504,8 +1582,8 @@ impl<'a> Evaluator<'a> {
         }))
     }
 
-    /// `variable-exists` / `global-variable-exists` / `function-exists` / `mixin-exists`：
-    /// 除 `variable-exists` 外都可带 `$module`（指向 `@use` 的命名空间）。
+    /// `variable-exists` / `global-variable-exists` / `function-exists` / `mixin-exists`:
+    /// All except `variable-exists` accept `$module` (pointing at a `@use` namespace).
     fn meta_exists(
         &mut self,
         which: &str,
@@ -1581,14 +1659,14 @@ impl<'a> Evaluator<'a> {
                             .star_scopes()
                             .any(|scope| evaluator.export_mixin_name(scope, &name))
                 }
-                _ => unreachable!("元函数已穷举"),
+                _ => unreachable!("metafunctions exhausted"),
             };
             Ok(Value::Bool(found))
         };
         check(self).map_err(|message| EvalError::new(base + at, message))
     }
 
-    /// `meta.module-functions($module)` / `meta.module-variables($module)`。
+    /// `meta.module-functions($module)` / `meta.module-variables($module)`.
     fn module_members(
         &mut self,
         which: &str,
@@ -1662,7 +1740,7 @@ impl<'a> Evaluator<'a> {
         result.map_err(|message| EvalError::new(base + at, message))
     }
 
-    /// `content-exists()`：只能在 mixin 体里调用。
+    /// `content-exists()`: can only be called inside a mixin body.
     fn content_exists(&mut self, at: usize) -> R<Value> {
         let (in_mixin, has_content) = self.mixin_context;
         if !in_mixin {
@@ -1674,8 +1752,8 @@ impl<'a> Evaluator<'a> {
         Ok(Value::Bool(has_content))
     }
 
-    /// `get-function($name, $css: false, $module: null)`：名字在**取函数时**校验，
-    /// 取不到就报 `Function not found: "x"`（1.35.2）。
+    /// `get-function($name, $css: false, $module: null)`: the name is validated **when the
+    /// function is taken**, and a miss reports `Function not found: "x"` (1.35.2).
     fn get_function(&mut self, src: &str, args: &[ComponentValue], at: usize) -> R<Value> {
         let inv = self.eval_invocation(src, args)?;
         let keywords = keywords_of(&inv);
@@ -1743,8 +1821,9 @@ impl<'a> Evaluator<'a> {
         result.map_err(|message| EvalError::new(base + at, message))
     }
 
-    /// `call($function, $args...)`：首个位置实参是 `get-function(...)` 的结果，
-    /// 其余实参照常绑定（用户函数 → 内置 → 未知时按 CSS 函数透传）。
+    /// `call($function, $args...)`: the first positional argument is the result of
+    /// `get-function(...)`, and the rest bind as usual (user function -> built-in -> passed
+    /// through as a CSS function when unknown).
     fn call_first_class(&mut self, src: &str, f: &Function) -> R<Value> {
         let mut inv = self.eval_invocation(src, &f.args)?;
         if inv.positional.is_empty() {
@@ -1820,8 +1899,10 @@ impl<'a> Evaluator<'a> {
         ))
     }
 
-    /// `variable-exists()` / `global-variable-exists()`：`global_only` 只看全局帧。
-    /// `as *` 引入的变量也算（dart 实测 `global-variable-exists()` 为 true）。
+    /// `variable-exists()` / `global-variable-exists()`: with `global_only` only the global
+    /// frames are consulted.
+    /// Variables brought in by `as *` count as well (observed with dart:
+    /// `global-variable-exists()` is true).
     fn variable_exists(&self, name: &str, global_only: bool) -> bool {
         let name = normalize_name(name);
         let scope = &self.scopes[self.active];
@@ -1850,8 +1931,9 @@ impl<'a> Evaluator<'a> {
             })
     }
 
-    /// `ns.fn(...)`：用户模块查函数表，内置模块走 `modules` 分派；两者都没有时
-    /// / 不是模块函数时都按 dart 报错。
+    /// `ns.fn(...)`: a user module consults its function table, a built-in module goes through
+    /// the `modules` dispatch; when neither has it / it is not a module function, the error
+    /// follows dart.
     fn qualified_function(&mut self, src: &str, f: &Function, q: &SassQualifiedName) -> R<Value> {
         let raw = || Value::Raw(src.get(f.span.start..f.span.end).unwrap_or("").to_string());
         let SassModuleMemberName::Ident(member) = &q.member else {
@@ -1907,8 +1989,9 @@ impl<'a> Evaluator<'a> {
                 }
             }
             ModuleRef::Builtin(module) => {
-                // 1.35.2：模块里根本没这个名字时报裸 `Undefined function.`；
-                // 名字在成员表里但不可调用（`color.lighten`）才报模块专属文案。
+                // 1.35.2: when the module has no such name at all it reports a bare
+                // `Undefined function.`; the module-specific message is only for a name in the
+                // member table that is not callable (`color.lighten`).
                 if !module.has_member(&normalize_name(member.name)) {
                     return Err(EvalError::new(at, "Undefined function."));
                 }
@@ -1925,12 +2008,15 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// `@include` / `@content` 的实参：位置实参 + 关键字实参（按源码顺序求值）。
-    /// `...` 展开 list 为位置实参、map 为关键字实参（dart 实测：其它值当作单个位置实参）。
+    /// Arguments of `@include` / `@content`: positional + keyword (evaluated in source
+    /// order).
+    /// `...` expands a list into positional arguments and a map into keyword arguments
+    /// (observed with dart: other values count as a single positional argument).
     pub(crate) fn eval_invocation(&mut self, src: &str, args: &[ComponentValue]) -> R<Invocation> {
         let mut out = Invocation::default();
         let mut saw_keyword = false;
-        // 先按顶层逗号分组：一组就是一个实参（组内可能是空格分隔的 list）。
+        // Group by top-level commas first: one group is one argument (a group may contain a
+        // space-separated list).
         for group in split_args(src, args) {
             match group {
                 [] => {}
@@ -1944,8 +2030,9 @@ impl<'a> Evaluator<'a> {
                     saw_keyword = true;
                 }
                 [ComponentValue::SassArbitraryArgument(a)] => {
-                    // `$x...`：list → 位置实参，map / ArgList → 关键字实参，其余当单个位置实参
-                    // （dart 实测：`null...` 就是一个 null 位置实参）。
+                    // `$x...`: list -> positional arguments, map / ArgList -> keyword
+                    // arguments, the rest counts as a single positional argument (observed with
+                    // dart: `null...` is one null positional argument).
                     let add_keyword =
                         |out: &mut Invocation, name: String, value: Value, span: Span| {
                             if out.keywords.iter().any(|(n, _, _)| n == &name) {
@@ -1957,7 +2044,8 @@ impl<'a> Evaluator<'a> {
                     match self.eval_comp(src, &a.value)? {
                         Value::List(list) if !list.bracketed => out.positional.extend(list.items),
                         Value::ArgList(list) => {
-                            // 展开会读关键字 map：dart 视为「已访问」，因此不再报多余命名实参。
+                            // Expanding reads the keyword map: dart counts that as "accessed" and
+                            // therefore no longer reports extra named arguments.
                             list.keywords_accessed.set(true);
                             out.positional.extend(list.positional);
                             for (name, value) in list.keywords {
@@ -1991,7 +2079,8 @@ impl<'a> Evaluator<'a> {
         Ok(out)
     }
 
-    /// 实参：按逗号分组求值（每组是一个表达式），`...` 展开与 `@include` 同一套。
+    /// Arguments: evaluated in comma groups (each group is one expression), with `...`
+    /// expansion using the same rules as `@include`.
     fn eval_args(
         &mut self,
         src: &str,
@@ -2023,7 +2112,7 @@ impl<'a> Evaluator<'a> {
                 sep: Sep::Comma,
                 bracketed: false,
             }),
-            1 => positional.into_iter().next().expect("长度 1"),
+            1 => positional.into_iter().next().expect("length 1"),
             _ => Value::List(List {
                 items: positional,
                 sep: Sep::Comma,
@@ -2034,14 +2123,17 @@ impl<'a> Evaluator<'a> {
     }
 
     // -----------------------------------------------------------------------
-    // 用户函数（@function / @return）
+    // User functions (@function / @return)
     // -----------------------------------------------------------------------
 
-    /// 实参绑定（dart `ArgumentDeclaration.verify` + 绑定顺序）：
-    /// 位置实参按序填形参 → 关键字按名补位 → 默认值按声明顺序求值（可引用前面的形参）；
-    /// `$rest...` 收集多余位置实参（dart 实测：rest 不吃关键字实参）。
-    /// 有 `$rest` 时多余的命名实参先装进 ArgList，等体跑完再决定要不要报错
-    /// （dart 实测：只要有人读过关键字 map（`keywords($args)`）就不报）。
+    /// Argument binding (dart `ArgumentDeclaration.verify` + binding order):
+    /// positional arguments fill the parameters in order -> keywords fill by name ->
+    /// defaults are evaluated in declaration order (they may refer to earlier parameters);
+    /// `$rest...` collects the extra positional arguments (observed with dart: rest does not
+    /// take keyword arguments).
+    /// With `$rest`, extra named arguments are first collected into an ArgList and whether to
+    /// report them is decided after the body has run (observed with dart: nothing is reported
+    /// once anyone read the keyword map (`keywords($args)`)).
     pub(crate) fn bind(
         &mut self,
         src: &str,
@@ -2110,7 +2202,7 @@ impl<'a> Evaluator<'a> {
             {
                 value.clone()
             } else {
-                let default = param.default.expect("已校验存在默认值");
+                let default = param.default.expect("validated to have a default value");
                 self.eval_component(src, default)?
             };
             self.declare_local(param.name, value);
@@ -2141,7 +2233,8 @@ impl<'a> Evaluator<'a> {
         }))
     }
 
-    /// 多余的命名实参：体跑完再报（体里读过关键字 map 就不报）。
+    /// Extra named arguments: reported after the body has run (nothing is reported when the
+    /// body read the keyword map).
     pub(crate) fn check_keywords(&self, check: RestCheck, at: usize) -> R<()> {
         if check.names.is_empty() || check.accessed.get() {
             return Ok(());
@@ -2162,8 +2255,9 @@ impl<'a> Evaluator<'a> {
         ))
     }
 
-    /// 调用用户函数：帧栈截到定义深度（看不到调用方局部变量），体里新建的局部变量
-    /// 随调用丢弃；`!global` 仍然写真正的全局帧（dart 实测）。
+    /// Calling a user function: the frame stack is truncated to the definition depth (the
+    /// caller's locals are invisible), and locals created in the body are dropped with the
+    /// call; `!global` still writes the real global frame (observed with dart).
     pub(crate) fn call_function(
         &mut self,
         def: FunctionDef<'a>,
@@ -2186,7 +2280,8 @@ impl<'a> Evaluator<'a> {
         };
         self.push_frame(false);
         let mut rest_check = None;
-        // 函数体（含默认值表达式）的 span 来自真实源码，只有在 base = 0 时才对得上。
+        // The spans of the function body (including default-value expressions) come from the
+        // real source and only line up when base = 0.
         let body_src = self.real.unwrap_or(src);
         let saved_base = self.base;
         self.base = 0;
@@ -2221,8 +2316,8 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// function 体：只有变量 / `@if` / `@each` / `@for` / `@while` / `@return` /
-    /// `@debug` / `@warn` / `@error`（其余由静态容器校验拦下）。
+    /// A function body: only variables / `@if` / `@each` / `@for` / `@while` / `@return` /
+    /// `@debug` / `@warn` / `@error` (the rest is rejected by the static container check).
     fn run_body(&mut self, src: &str, stmts: &'a [Statement<'a>]) -> R<Flow> {
         for st in stmts {
             match st {
@@ -2395,11 +2490,12 @@ impl<'a> Evaluator<'a> {
     }
 
     // -----------------------------------------------------------------------
-    // 循环迭代协议（Converter 与 function 体共用）
+    // Loop iteration protocol (shared by Converter and function bodies)
     // -----------------------------------------------------------------------
 
-    /// `@each`：表达式 → 每次迭代的绑定值。null → 零次；map → 每项是 `(k v)` 对；
-    /// 多变量按元素解构，缺位补 `null`（dart 实测），多出的元素忽略。
+    /// `@each`: expression -> the bound value of every iteration. null -> zero times; map ->
+    /// each item is a `(k v)` pair; several variables destructure per element, missing
+    /// positions are filled with `null` (observed with dart), extra elements are ignored.
     pub(crate) fn each_rows(
         &mut self,
         src: &str,
@@ -2427,8 +2523,10 @@ impl<'a> Evaluator<'a> {
         Ok(rows)
     }
 
-    /// `@for`：`from`/`to` 求值成整数后按方向生成序列（dart 实测：下界大于上界时倒序，
-    /// 不是空循环）。循环变量的单位取 `from` 的写法，`to` 会先换算到同一单位。
+    /// `@for`: `from`/`to` are evaluated into integers and the sequence is generated by
+    /// direction (observed with dart: a lower bound greater than the upper one counts down,
+    /// it is not an empty loop). The loop variable takes the unit spelling of `from`, and
+    /// `to` is converted to the same unit first.
     pub(crate) fn for_values(
         &mut self,
         src: &str,
@@ -2474,8 +2572,9 @@ impl<'a> Evaluator<'a> {
     }
 }
 
-/// `@each` / 解构用：null → None；map → `(k v)` 对的 list；单个值 → `[自身]`。
-/// 关键字实参 → `modules` 需要的形态。
+/// For `@each` / destructuring: null -> None; map -> a list of `(k v)` pairs; a single
+/// value -> `[itself]`.
+/// Keyword arguments -> the shape `modules` needs.
 fn keywords_of(inv: &Invocation) -> Vec<(String, Value)> {
     inv.keywords
         .iter()
@@ -2483,7 +2582,8 @@ fn keywords_of(inv: &Invocation) -> Vec<(String, Value)> {
         .collect()
 }
 
-/// 用 `$args...` 调一个纯 CSS 函数：只有一个实参时直接用它（`bar(1px)`）。
+/// Call a plain CSS function with `$args...`: with a single argument, use it directly
+/// (`bar(1px)`).
 fn css_function_call(name: &str, positional: Vec<Value>) -> Value {
     let args = match positional.len() {
         0 => Value::List(List {
@@ -2491,7 +2591,7 @@ fn css_function_call(name: &str, positional: Vec<Value>) -> Value {
             sep: Sep::Comma,
             bracketed: false,
         }),
-        1 => positional.into_iter().next().expect("长度 1"),
+        1 => positional.into_iter().next().expect("length 1"),
         _ => Value::List(List {
             items: positional,
             sep: Sep::Comma,
@@ -2525,7 +2625,7 @@ fn as_list(value: &Value) -> Option<Vec<Value>> {
     }
 }
 
-/// `@for` 的边界必须是整数（dart `assertInt` 文案）。
+/// The bounds of `@for` must be integers (wording of dart's `assertInt`).
 fn int_value(number: &Number, value: f64, at: usize) -> R<i64> {
     if (value - value.round()).abs() > value::EPSILON {
         return Err(EvalError::new(
@@ -2545,8 +2645,8 @@ fn int_value(number: &Number, value: f64, at: usize) -> R<i64> {
     Ok(value.round() as i64)
 }
 
-/// 把 `to` 换算到 `from` 的单位（coerceUnitless）；类型不匹配时给 dart 的
-/// `Expected 3em to have a length unit (in, cm, pc, mm, q, pt, px).` 文案。
+/// Convert `to` into the unit of `from` (coerceUnitless); on a type mismatch, dart's
+/// `Expected 3em to have a length unit (in, cm, pc, mm, q, pt, px).` message.
 fn coerce_for(from: &Number, to: &Number, at: usize) -> R<f64> {
     if from.numer == to.numer && from.denom == to.denom {
         return Ok(to.value);
@@ -2589,16 +2689,18 @@ fn str_span(s: &InterpolableStr) -> Span {
     }
 }
 
-/// 单位里出现 `-数字` 时切成两个数字（`10px-5px` → `10px - 5px`）。
+/// When a unit contains `-digit`, split it into two numbers (`10px-5px` -> `10px - 5px`).
 fn unit_split_point(unit: &str) -> Option<usize> {
     let bytes = unit.as_bytes();
     (1..bytes.len()).find(|&i| bytes[i] == b'-' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit))
 }
 
-/// 顶层逗号切分实参（组件层已经去掉嵌套括号）。
-/// 按顶层逗号切分实参。oxc 的 `Function` 实参里逗号是独立组件，而 `@include` 会把
-/// 逗号从 `args` 里去掉、只留 span 间隙——所以两处都要看：显式逗号组件，或相邻组件
-/// 源码间隙里的 `,`。
+/// Split arguments on top-level commas (nested parentheses are already gone at the
+/// component level).
+/// Split arguments on top-level commas. In oxc's `Function` arguments a comma is a separate
+/// component, while `@include` removes the commas from `args` and leaves only span gaps -- so
+/// both must be considered: an explicit comma component, or a `,` in the source gap between
+/// adjacent components.
 fn split_args<'a, 'b>(src: &str, args: &'b [ComponentValue<'a>]) -> Vec<&'b [ComponentValue<'a>]> {
     let mut groups = Vec::new();
     let mut start = 0usize;
@@ -2613,7 +2715,8 @@ fn split_args<'a, 'b>(src: &str, args: &'b [ComponentValue<'a>]) -> Vec<&'b [Com
             groups.push(&args[start..i]);
             start = i + 1;
         } else if gap_comma {
-            // 逗号只存在于 span 间隙（`@include` 的实参），当前组件属于下一组。
+            // A comma only exists in the span gap (the arguments of `@include`), so the
+            // current component starts the next group.
             groups.push(&args[start..i]);
             start = i;
         }
@@ -2623,13 +2726,13 @@ fn split_args<'a, 'b>(src: &str, args: &'b [ComponentValue<'a>]) -> Vec<&'b [Com
 }
 
 // ---------------------------------------------------------------------------
-// token 摊平 + 优先级解析
+// token flattening + precedence parsing
 // ---------------------------------------------------------------------------
 
 #[derive(Clone, Copy)]
 enum OpKind<'b> {
     Ast(&'b SassBinaryOperatorKind, &'b Span),
-    /// 组件序列里的裸 `/`（oxc 不把它折成二元运算）。
+    /// A bare `/` in the component sequence (oxc does not fold it into a binary operation).
     Slash(Span),
 }
 
@@ -2686,7 +2789,8 @@ enum ExprKind<'a, 'b> {
 }
 
 impl ExprKind<'_, '_> {
-    /// 表达式起点（dart 的运算符错误都指向整个运算表达式的开头）。
+    /// Start of the expression (dart's operator errors all point at the start of the whole
+    /// operation expression).
     fn start(&self) -> usize {
         match self {
             ExprKind::Val(comp) => comp.span().start,
@@ -2696,7 +2800,7 @@ impl ExprKind<'_, '_> {
         }
     }
 
-    /// dart-sass 的 allowSlash：整棵子树只由 `/` 与字面数字组成。
+    /// dart-sass's allowSlash: the whole subtree consists only of `/` and literal numbers.
     fn slash_ok(&self) -> bool {
         match self {
             ExprKind::Val(comp) => matches!(
@@ -2789,26 +2893,26 @@ impl<'a, 'b> ExprParser<'a, 'b> {
             }
             match items.len() {
                 0 => Ok(ExprKind::List(Vec::new(), Sep::Comma, false)),
-                1 => Ok(items.pop().expect("长度 1")),
+                1 => Ok(items.pop().expect("length 1")),
                 _ => Ok(ExprKind::List(items, Sep::Comma, false)),
             }
         } else {
             match items.len() {
                 0 => Ok(ExprKind::List(Vec::new(), Sep::Space, false)),
-                1 => Ok(items.pop().expect("长度 1")),
+                1 => Ok(items.pop().expect("length 1")),
                 _ => Ok(ExprKind::List(items, Sep::Space, false)),
             }
         }
     }
 
-    /// 空格分隔的一段：连续的二元表达式。
+    /// A space-separated run: consecutive binary expressions.
     fn parse_space(&mut self) -> Result<ExprKind<'a, 'b>, ParseError> {
         let mut items = vec![self.parse_binary(0)?];
         while matches!(self.peek(), Some(Tok::Val(_)) | Some(Tok::Prefix(_))) {
             items.push(self.parse_binary(0)?);
         }
         if items.len() == 1 {
-            return Ok(items.pop().expect("长度 1"));
+            return Ok(items.pop().expect("length 1"));
         }
         Ok(ExprKind::List(items, Sep::Space, false))
     }
@@ -2856,7 +2960,8 @@ impl<'a, 'b> ExprParser<'a, 'b> {
     }
 }
 
-/// dart 的 `unvendor`：去掉 `-webkit-` 等厂商前缀（只用于识别特殊函数名）。
+/// dart's `unvendor`: strip vendor prefixes such as `-webkit-` (only used to recognize
+/// special function names).
 fn unvendor(name: &str) -> &str {
     name.strip_prefix("-webkit-")
         .or_else(|| name.strip_prefix("-moz-"))
@@ -2865,15 +2970,20 @@ fn unvendor(name: &str) -> &str {
         .unwrap_or(name)
 }
 
-/// 嵌套在 `min()`/`max()` 里时按纯 CSS 处理、内容不再校验的函数。
+/// Functions nested in `min()`/`max()` are treated as plain CSS and their contents are not
+/// validated.
 const CSS_MATH_FUNCS: [&str; 6] = ["calc", "clamp", "env", "var", "min", "max"];
 
 impl<'a> Evaluator<'a> {
-    /// `min()` / `max()` / `clamp()` 的纯 CSS 形态（现代 dart-sass 的计算式语义）。
+    /// The plain CSS form of `min()` / `max()` / `clamp()` (the calculation semantics of modern
+    /// dart-sass).
     ///
-    /// 实参里出现不可求值的原子（`var()` / `env()` / `constant()` 这类未知函数 /
-    /// 裸标识符 / 插值）时整条按 CSS 透传；整段实参是 `calc()` 时剥掉冗余层。
-    /// 实参全是数字时仍交给内置函数求值（`min(1px, 2px)` → `1px`）。
+    /// When an argument contains an atom that cannot be evaluated (an unknown function such
+    /// as `var()` / `env()` / `constant()` / a bare identifier / an interpolation), the whole
+    /// call passes through as CSS; when the whole argument is `calc()`, the redundant layer is
+    /// stripped.
+    /// When all arguments are numbers, the built-in function still evaluates it
+    /// (`min(1px, 2px)` -> `1px`).
     fn css_math_call(&mut self, src: &str, f: &Function, name: &str) -> R<Option<Value>> {
         let math = name.to_ascii_lowercase();
         let raw = src.get(f.span.start..f.span.end).unwrap_or("");
@@ -2905,7 +3015,8 @@ impl<'a> Evaluator<'a> {
         Ok(Some(Value::Raw(text)))
     }
 
-    /// 一个数学函数实参：整段就是一个 `calc()` 时剥掉冗余层。
+    /// One math function argument: when the whole segment is a `calc()`, strip the redundant
+    /// layer.
     fn css_math_arg(&mut self, text: &str, at: usize) -> R<Option<(String, bool)>> {
         if let Some((inner, inner_at)) = whole_calc(text, at) {
             let Some(scan) = self.css_math_scan(inner, inner_at, 0, false)? else {
@@ -2914,9 +3025,10 @@ impl<'a> Evaluator<'a> {
             if scan.end < inner.len() {
                 return Ok(None);
             }
-            // dart 的 `_needsParentheses`：剥掉 `calc()` 后只剩一个不透明值、
-            // 且该值含空白 / `*` / `/` 或以 `var(` 开头时补括号
-            // （`calc(var(--x))` → `(var(--x))`，`calc(env(x))` → `env(x)`）。
+            // dart's `_needsParentheses`: after stripping `calc()` only one opaque value is
+            // left, and parentheses are added when that value contains whitespace / `*` / `/`
+            // or starts with `var(`
+            // (`calc(var(--x))` -> `(var(--x))`, `calc(env(x))` -> `env(x)`).
             if scan.opaque && !scan.operators && needs_parentheses(&scan.text) {
                 return Ok(Some((format!("({})", scan.text), true)));
             }
@@ -2931,8 +3043,10 @@ impl<'a> Evaluator<'a> {
         Ok(Some((fold_calc_text(scan.text), scan.opaque)))
     }
 
-    /// 把一段函数调用当 SassScript 求值；结果是简单单位的数字才返回。
-    /// `var()`/`env()`/未知函数会得到非数字（或报错），交由调用方按纯 CSS 透传。
+    /// Evaluate a function call as SassScript; return only when the result is a number with a
+    /// simple unit.
+    /// `var()`/`env()`/unknown functions yield a non-number (or an error), and the caller
+    /// passes them through as plain CSS.
     fn sass_math_number(&mut self, call: &str, at: usize) -> Option<Number> {
         match self.eval_text(call, at).ok()? {
             Value::Number(number) if number.is_simple() => Some(number.without_slash()),
@@ -2940,7 +3054,8 @@ impl<'a> Evaluator<'a> {
         }
     }
 
-    /// 全数字实参：走内置 `min`/`max` 求值；单位不可比等情况返回 `None`（按 CSS 透传）。
+    /// All-numeric arguments: evaluated by the built-in `min`/`max`; incomparable units and
+    /// the like return `None` (passed through as CSS).
     fn math_numeric(&mut self, name: &str, texts: &[String]) -> Option<Value> {
         if texts.is_empty() {
             return None;
@@ -2957,10 +3072,12 @@ impl<'a> Evaluator<'a> {
             .flatten()
     }
 
-    /// `calc()` 内部的 SassScript：内联变量值与 Sass 函数调用，其余原样。
+    /// SassScript inside `calc()`: inline variable values and Sass function calls, keep the
+    /// rest as is.
     ///
-    /// 插值的结果用 `INTERP_OPEN`/`INTERP_CLOSE` 括起来：化简时它是不透明原子
-    /// （dart 的 `CalculationInterpolation` 不参与求值），但旁边的数字仍能合并。
+    /// Interpolation results are wrapped in `INTERP_OPEN`/`INTERP_CLOSE`: while simplifying
+    /// they are opaque atoms (dart's `CalculationInterpolation` takes no part in evaluation),
+    /// but the numbers next to them can still be merged.
     fn calc_script(&mut self, text: &str, at: usize) -> R<String> {
         let bytes = text.as_bytes();
         let mut out = String::new();
@@ -2993,7 +3110,7 @@ impl<'a> Evaluator<'a> {
                         .is_some_and(|c| c.is_ascii_alphabetic() || *c == b'-'));
             if ident_start && !starts_number(text, i) {
                 let mut end = ident_end(text, i);
-                // `map.get(...)` 这类限定名整体是一个 Sass 调用。
+                // A qualified name such as `map.get(...)` is one Sass call as a whole.
                 if bytes.get(end) == Some(&b'.')
                     && bytes.get(end + 1).is_some_and(u8::is_ascii_alphabetic)
                 {
@@ -3012,7 +3129,7 @@ impl<'a> Evaluator<'a> {
                                 || lower == "calc"
                                 || (lower.starts_with('-') && lower.ends_with("-calc")));
                         if !css_math {
-                            // 用户函数 / Sass 内置：求值后按 CSS 文本内联。
+                            // User function / Sass built-in: evaluate and inline as CSS text.
                             let value = self.eval_text(call, at + i)?;
                             out.push_str(&calc_text(&value)?);
                             i = close + 1;
@@ -3028,15 +3145,16 @@ impl<'a> Evaluator<'a> {
                 i = end;
                 continue;
             }
-            let ch = text[i..].chars().next().expect("非空");
+            let ch = text[i..].chars().next().expect("non-empty");
             out.push(ch);
             i += ch.len_utf8();
         }
         Ok(out)
     }
 
-    /// 扫描一段 CSS 数学函数内容。`in_paren` 为真时遇到 `)` 就停下（不消费）。
-    /// 语法不合 CSS 产生式时返回 `None`。
+    /// Scan the content of a CSS math function. When `in_paren` is true, stop at a `)`
+    /// (without consuming it).
+    /// Return `None` when the syntax does not match the CSS production.
     fn css_math_scan(
         &mut self,
         text: &str,
@@ -3098,7 +3216,8 @@ impl<'a> Evaluator<'a> {
                     continue;
                 }
                 b'#' if bytes.get(i + 1) == Some(&b'{') => {
-                    // 插值是求值期才知道的值：dart 不做化简，整条按 CSS 透传。
+                    // Interpolation is a value known only at evaluation time: dart does no
+                    // simplification and passes the whole thing through as CSS.
                     if value_pending {
                         if !prev_opaque {
                             return Ok(None);
@@ -3116,7 +3235,8 @@ impl<'a> Evaluator<'a> {
                     continue;
                 }
                 b'(' => {
-                    // `( 1px` 这种左括号后带空白的写法在 dart 里解析失败。
+                    // A left parenthesis followed by whitespace, such as `( 1px`, fails to parse
+                    // in dart.
                     if value_pending || bytes.get(i + 1).is_some_and(u8::is_ascii_whitespace) {
                         return Ok(None);
                     }
@@ -3135,7 +3255,8 @@ impl<'a> Evaluator<'a> {
                 }
                 _ if starts_number(text, i) => {
                     if value_pending {
-                        // `1px 2px` 这类相邻数字不合法；`bar 1px` 则是合法的空格序列。
+                        // Adjacent numbers such as `1px 2px` are illegal; `bar 1px` is a valid
+                        // space sequence.
                         if !prev_opaque {
                             return Ok(None);
                         }
@@ -3149,14 +3270,16 @@ impl<'a> Evaluator<'a> {
                     continue;
                 }
                 _ if b.is_ascii_alphabetic() => {
-                    // 空格序列（`2px bar`）在 dart 里合法：标识符本身把整条变成不透明值。
+                    // A space sequence (`2px bar`) is legal in dart: the identifier itself makes
+                    // the whole thing an opaque value.
                     if value_pending {
                         out.push(' ');
                     }
                     let end = ident_end(text, i);
                     let name = text[i..end].to_ascii_lowercase();
                     if bytes.get(end) != Some(&b'(') {
-                        // 裸标识符（`bar`、`e`）：不透明值，整条按 CSS 透传。
+                        // A bare identifier (`bar`, `e`): an opaque value, so the whole thing
+                        // passes through as CSS.
                         out.push_str(&text[i..end]);
                         i = end;
                         value_pending = true;
@@ -3181,8 +3304,9 @@ impl<'a> Evaluator<'a> {
                         opaque |= inner.opaque;
                         operators |= inner.operators;
                     } else if let Some(number) = self.sass_math_number(&text[i..=close], at + i) {
-                        // 已知 Sass 函数（`lightness($c)` / `map.get(…)`）：求值成数字后
-                        // 内联，照常参与 CSS 数学（dart 默认就把实参当 SassScript 求值）。
+                        // A known Sass function (`lightness($c)` / `map.get(…)`): evaluated into
+                        // a number and inlined, taking part in CSS math as usual (dart evaluates
+                        // arguments as SassScript by default).
                         if value_pending {
                             if !prev_opaque {
                                 return Ok(None);
@@ -3192,8 +3316,9 @@ impl<'a> Evaluator<'a> {
                         out.push_str(&number.format());
                         prev_opaque = false;
                     } else {
-                        // `var()` / `env()` / 嵌套 `calc()` / 未知函数（`constant()`）：
-                        // 原样内联（只做插值与空白折叠），并且都不可求值。
+                        // `var()` / `env()` / nested `calc()` / unknown functions
+                        // (`constant()`): inlined as is (only interpolation and whitespace
+                        // collapsing), and none of them can be evaluated.
                         let inner = self.interpolate(inner_raw, at + end + 1)?;
                         out.push_str(&format!("{name}({})", collapse_spaces(&inner)));
                         prev_opaque = true;
@@ -3209,17 +3334,20 @@ impl<'a> Evaluator<'a> {
     }
 }
 
-/// 一次 CSS 数学函数内容扫描的结果。
+/// The result of one scan of CSS math function content.
 struct MathScan {
     text: String,
     end: usize,
-    /// 含不可求值的原子（`var()` / `env()` / 未知函数 / 裸标识符 / 插值）。
+    /// Contains an atom that cannot be evaluated (`var()` / `env()` / unknown function / bare
+    /// identifier / interpolation).
     opaque: bool,
-    /// 出现过运算符（决定剥 `calc()` 时要不要补括号）。
+    /// An operator appeared (decides whether parentheses are needed when stripping
+    /// `calc()`).
     operators: bool,
 }
 
-/// 整段文本恰好就是一个 `calc(...)` 时返回括号内的内容与它的源码起点。
+/// When the whole text is exactly one `calc(...)`, return the content inside the parentheses
+/// and its source start.
 fn whole_calc(text: &str, at: usize) -> Option<(&str, usize)> {
     let open = text.find('(')?;
     if unvendor(&text[..open].to_ascii_lowercase()) != "calc" {
@@ -3231,7 +3359,8 @@ fn whole_calc(text: &str, at: usize) -> Option<(&str, usize)> {
     Some((&text[open + 1..text.len() - 1], at + open + 1))
 }
 
-/// dart 的 `_needsParentheses`：`calc()` 内容嵌进别的计算式时是否需要括号。
+/// dart's `_needsParentheses`: whether the content of `calc()` needs parentheses when
+/// nested into another calculation.
 fn needs_parentheses(text: &str) -> bool {
     text.chars()
         .any(|c| c.is_whitespace() || c == '/' || c == '*')
@@ -3241,21 +3370,22 @@ fn needs_parentheses(text: &str) -> bool {
 }
 
 // ---------------------------------------------------------------------------
-// calc 常数化简
+// calc constant folding
 // ---------------------------------------------------------------------------
 
-/// `calc()` 内容的化简结果。
+/// The simplification result of `calc()` content.
 enum CalcFold {
-    /// 整条是纯数字：`calc(1px + 2px)` → `3px`（连 `calc()` 一起去掉）。
+    /// The whole thing is numeric: `calc(1px + 2px)` -> `3px` (the `calc()` goes away too).
     Number(Number),
-    /// 化简后的计算式文本（仍需外层 `calc()`）。
+    /// The simplified calculation text (still needs an outer `calc()`).
     Text(String),
-    /// 超出支持范围：原样保留。
+    /// Out of the supported range: kept as is.
     Verbatim,
 }
 
-/// 计算式 AST。括号只在包住“单独一个原子”时保留（dart 同样保留
-/// `calc((var(--x)))`），包住运算时丢掉，优先级由序列化重算。
+/// A calculation AST. Parentheses are kept only when they wrap "a single atom" (dart keeps
+/// `calc((var(--x)))` as well) and dropped when they wrap an operation, whose precedence is
+/// recomputed by serialization.
 enum CalcNode {
     Num(Number),
     Opaque(String),
@@ -3263,7 +3393,8 @@ enum CalcNode {
     Paren(Box<CalcNode>),
 }
 
-/// 插值结果的边界（`calc_script` 标记，化简完就删掉）。
+/// Boundary of an interpolation result (the `calc_script` marker; removed once
+/// simplification is done).
 const INTERP_OPEN: char = '\u{1}';
 const INTERP_CLOSE: char = '\u{2}';
 const INTERP_OPEN_BYTE: u8 = 1;
@@ -3272,7 +3403,7 @@ fn strip_interp_marks(text: &str) -> String {
     text.replace([INTERP_OPEN, INTERP_CLOSE], "")
 }
 
-/// 常数化简后的文本；化简不了时原样返回。
+/// The text after constant folding; returned as is when it cannot be simplified.
 fn fold_calc_text(text: String) -> String {
     match fold_calc(&text) {
         CalcFold::Number(number) => number.format(),
@@ -3281,9 +3412,11 @@ fn fold_calc_text(text: String) -> String {
     }
 }
 
-/// 化简一段 `calc()` 内容（已折叠空白），口径同 dart 的 `Calculation.simplify`：
-/// 纯数字子式按 Sass 单位规则合并，其余按优先级重新序列化；需要括号时写成
-/// 嵌套 `calc()`（老 WebKit 对 calc 内裸括号支持不完整）。
+/// Simplify a piece of `calc()` content (whitespace already collapsed), with the same rules
+/// as dart's `Calculation.simplify`: purely numeric subexpressions are merged by the Sass
+/// unit rules, the rest is re-serialized by precedence, and parentheses are written as a
+/// nested `calc()` when needed (old WebKit does not fully support bare parentheses inside
+/// calc).
 fn fold_calc(text: &str) -> CalcFold {
     let mut parser = CalcParser { text, i: 0 };
     let Some(node) = parser.sum() else {
@@ -3417,7 +3550,8 @@ impl CalcParser<'_> {
         if unvendor(&name.to_ascii_lowercase()) != "calc" {
             return Some(CalcNode::Opaque(format!("{name}({inner})")));
         }
-        // `calc()` 嵌在计算式里：展开成子式（dart 的 calculation 是扁平的）。
+        // `calc()` nested in a calculation: expand it into a subexpression (dart's calculation
+        // is flat).
         let mut sub = CalcParser { text: inner, i: 0 };
         let node = sub.sum()?;
         sub.skip_ws();
@@ -3425,7 +3559,7 @@ impl CalcParser<'_> {
     }
 }
 
-/// 一元负号：数字直接取反，其余按 dart 的写法变成 `-1 * x`。
+/// Unary minus: a number is negated directly, the rest becomes `-1 * x` the dart way.
 fn negate_calc(node: CalcNode) -> CalcNode {
     match node {
         CalcNode::Num(number) => CalcNode::Num(Number {
@@ -3442,7 +3576,8 @@ fn negate_calc(node: CalcNode) -> CalcNode {
 
 fn simplify_calc(node: CalcNode) -> CalcNode {
     if let CalcNode::Paren(inner) = node {
-        // `calc((1em*0.5))` 折叠成数字；`calc((var(--x)))` 保留括号（dart 实测）。
+        // `calc((1em*0.5))` folds into a number; `calc((var(--x)))` keeps its parentheses
+        // (observed with dart).
         return match simplify_calc(*inner) {
             CalcNode::Opaque(text) => CalcNode::Paren(Box::new(CalcNode::Opaque(text))),
             other => other,
@@ -3457,7 +3592,7 @@ fn simplify_calc(node: CalcNode) -> CalcNode {
             return CalcNode::Num(number);
         }
     }
-    // `a + -2px` → `a - 2px`，`a - -2px` → `a + 2px`（dart 同样规整）。
+    // `a + -2px` -> `a - 2px`, `a - -2px` -> `a + 2px` (dart normalizes the same way).
     if let (CalcNode::Num(b), '+' | '-') = (&rhs, op) {
         if b.value < 0.0 {
             let flipped = if op == '+' { '-' } else { '+' };
@@ -3471,7 +3606,8 @@ fn simplify_calc(node: CalcNode) -> CalcNode {
     CalcNode::Op(op, Box::new(lhs), Box::new(rhs))
 }
 
-/// 两个数字的加减乘除；单位不可合并 / 结果是复合单位时返回 `None`（保留原式）。
+/// Add/subtract/multiply/divide two numbers; return `None` when the units cannot be merged
+/// or the result has a compound unit (the original expression is kept).
 fn fold_calc_numbers(op: char, a: &Number, b: &Number) -> Option<Number> {
     let result = match op {
         '+' | '-' if a.is_unitless() != b.is_unitless() => return None,
@@ -3515,7 +3651,8 @@ fn write_calc(node: &CalcNode, out: &mut String) {
     }
 }
 
-/// 右结合侧的同级运算要括号（`a - (b - c)`）；需要时写成嵌套 `calc()`。
+/// A same-precedence operation on the right-associative side needs parentheses
+/// (`a - (b - c)`); written as a nested `calc()` when needed.
 fn write_calc_child(child: &CalcNode, parent: char, right: bool, out: &mut String) {
     let needs = match child {
         CalcNode::Op(inner, ..) => {
@@ -3536,7 +3673,7 @@ fn write_calc_child(child: &CalcNode, parent: char, right: bool, out: &mut Strin
     }
 }
 
-/// 解析 `1.5px` / `50%` / `1e3px`：返回 (数值, 单位, 消费的字节数)。
+/// Parse `1.5px` / `50%` / `1e3px`: returns (value, unit, number of bytes consumed).
 fn calc_number(text: &str) -> Option<(f64, &str, usize)> {
     let bytes = text.as_bytes();
     let mut j = 0;
@@ -3582,7 +3719,7 @@ fn starts_number(text: &str, i: usize) -> bool {
         || (bytes.get(j) == Some(&b'.') && bytes.get(j + 1).is_some_and(u8::is_ascii_digit))
 }
 
-/// 数字（含符号、小数、指数）加单位的结尾位置。
+/// End position of a number (including sign, fraction, exponent) plus its unit.
 fn number_end(text: &str, i: usize) -> usize {
     let bytes = text.as_bytes();
     let mut j = i;
@@ -3631,7 +3768,7 @@ fn ident_end(text: &str, i: usize) -> usize {
     j
 }
 
-/// `#{...}` 的结尾（含 `}` 之后的位置）。
+/// End of `#{...}` (including the position after `}`).
 fn interpolation_end(text: &str, i: usize) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut depth = 1usize;
@@ -3662,12 +3799,12 @@ fn interpolation_end(text: &str, i: usize) -> Option<usize> {
     None
 }
 
-/// `open` 位置 `(` 对应的 `)` 位置。
+/// The `)` position matching the `(` at `open`.
 fn matching_paren(text: &str, open: usize) -> Option<usize> {
     crate::text::matching(text, open).map(|end| end - 1)
 }
 
-/// 把连续空白折成一个空格（不裁剪首尾）。
+/// Collapse consecutive whitespace into one space (leading/trailing ones are not trimmed).
 fn collapse_spaces(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut space = false;
@@ -3685,7 +3822,7 @@ fn collapse_spaces(text: &str) -> String {
     out
 }
 
-/// `calc()` 里内联一个 Sass 值：字符串去掉引号，其余用 CSS 文本。
+/// Inline a Sass value inside `calc()`: strings lose their quotes, the rest uses CSS text.
 fn calc_text(value: &Value) -> Result<String, EvalError> {
     let text = match value {
         Value::Str(text) => text.text.clone(),
@@ -3696,7 +3833,7 @@ fn calc_text(value: &Value) -> Result<String, EvalError> {
     Ok(text)
 }
 
-/// `calc(...)` / `min(...)` 之类 → (函数名, 括号内的文本)。
+/// `calc(...)` / `min(...)` and the like -> (function name, text inside the parentheses).
 fn split_calc(text: &str) -> Option<(String, String)> {
     const CALC_FUNCS: [&str; 11] = [
         "calc", "min", "max", "clamp", "round", "mod", "rem", "sin", "cos", "tan", "hypot",
@@ -3718,7 +3855,8 @@ fn split_calc(text: &str) -> Option<(String, String)> {
     ))
 }
 
-/// 按顶层分隔符切分（忽略括号 / 引号 / 注释内的分隔符）。
+/// Split on top-level separators (ignoring separators inside parentheses / quotes /
+/// comments).
 fn split_top_level(text: &str, sep: char) -> Vec<&str> {
     crate::text::split_top_level(text, sep as u8)
         .into_iter()
@@ -3730,7 +3868,8 @@ fn split_top_level(text: &str, sep: char) -> Vec<&str> {
 mod tests {
     use super::*;
 
-    /// S2 的 mixin / function 查找会复用这个归一（dart：`m_x` ≡ `m-x`，但 `un_quote` ≠ `unquote`）。
+    /// The mixin / function lookup of S2 reuses this normalization (dart: `m_x` ≡ `m-x`,
+    /// but `un_quote` ≠ `unquote`).
     #[test]
     fn normalize_name_maps_underscore_to_hyphen() {
         assert_eq!(normalize_name("a_b"), "a-b");

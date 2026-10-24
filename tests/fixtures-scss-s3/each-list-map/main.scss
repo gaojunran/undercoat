@@ -1,4 +1,4 @@
-// @each 遍历 list / map（键值解构）/ 单变量取键值对。
+// @each over lists / maps (key-value destructuring) / a single variable taking a key-value pair.
 $sizes: 4px 8px 12px;
 $theme: (primary: #007bff, danger: #dc3545);
 $grid: (1 2, 3 4, 5 6);
@@ -15,7 +15,7 @@ $grid: (1 2, 3 4, 5 6);
   }
 }
 
-// 单个变量遍历 map：元素是 `键 值` 两元的 list。
+// iterating a map with a single variable: each element is a two-item `key value` list.
 @each $pair in $theme {
   .pair {
     content: inspect($pair);
@@ -29,7 +29,7 @@ $grid: (1 2, 3 4, 5 6);
   }
 }
 
-// 循环体里的插值、嵌套规则与 @if 都走同一套收集器。
+// interpolation, nested rules and @if inside the loop body all go through the same collector.
 @each $name, $color in $theme {
   .btn-#{$name} {
     background: $color;

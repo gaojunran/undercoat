@@ -1,19 +1,21 @@
-//! mixin / function / 控制流：定义、参数绑定、`@include`+content、`@if`/`@each`/`@for`/`@while`。
+//! mixin / function / control flow: definitions, argument binding,
+//! `@include`+content, `@if`/`@each`/`@for`/`@while`.
 //!
-//! 由 `scss/mod.rs` 拆分而来（纯搬运）。
+//! Split out of `scss/mod.rs` (pure code move).
 
 use super::*;
 
 impl<'a> Converter<'a> {
-    /// `@mixin`：只登记定义，不产出 CSS。
+    /// `@mixin`: only registers the definition, emits no CSS.
     pub(super) fn define_mixin(
         &mut self,
         at: &'a oxc_css_parser::ast::AtRule<'a>,
     ) -> Result<(), Box<CompileError>> {
         let Some(AtRulePrelude::SassMixin(mixin)) = &at.prelude else {
-            return Err(self.err(at.span.start, "SCSS 解析失败: @mixin"));
+            return Err(self.err(at.span.start, "SCSS parse failure: @mixin"));
         };
-        // 容器校验已由 `validate_structure` 在解析期完成；这里保留一道运行时兜底。
+        // Container validation is already done at parse time by `validate_structure`;
+        // this is a runtime fallback.
         if self.control_depth > 0 {
             let message = if self.in_mixin {
                 "Mixins may not contain mixin declarations."
@@ -23,7 +25,7 @@ impl<'a> Converter<'a> {
             return Err(self.err(at.span.start, message));
         }
         let Some(block) = &at.block else {
-            return Err(self.err(at.span.start, "SCSS 解析失败: @mixin"));
+            return Err(self.err(at.span.start, "SCSS parse failure: @mixin"));
         };
         let (params, rest) = self.params(mixin.parameters.as_ref())?;
         let scope = self.eval.active_scope();
@@ -44,7 +46,7 @@ impl<'a> Converter<'a> {
         Ok(())
     }
 
-    /// 形参列表（重名报 dart 同款文案）。
+    /// Parameter list (duplicate names report dart's own message).
     fn params(
         &self,
         params: Option<&'a SassParameters<'a>>,
@@ -72,9 +74,10 @@ impl<'a> Converter<'a> {
         ))
     }
 
-    /// mixin 查找：命名空间取模块的对外成员表，否则从当前帧向外层找（最近的优先），
-    /// 最后找 `@use ... as *` 引入的模块（后引入的优先）。星号模块的 mixin 只在
-    /// 本作用域可见，不对外导出。
+    /// mixin lookup: with a namespace, look in the module's exported member table;
+    /// otherwise search outwards from the current frame (nearest first), and finally
+    /// the modules pulled in by `@use ... as *` (later imports first). Mixins of a
+    /// star module are visible in this scope only and are not exported.
     fn find_mixin(&self, name: &str, namespace: Option<&str>) -> Option<MixinDef<'a>> {
         let name = eval::normalize_name(name);
         if let Some(namespace) = namespace {
@@ -90,7 +93,8 @@ impl<'a> Converter<'a> {
             .find_map(|scope| self.export_mixin(scope, &name, 0))
     }
 
-    /// 模块对外成员里的 mixin 名与定义处（`@forward` 重复检测用）。
+    /// Mixin names and defining scopes among a module's exported members (used by the
+    /// `@forward` duplicate check).
     pub(super) fn export_mixin_origins(
         &self,
         scope: usize,
@@ -120,7 +124,8 @@ impl<'a> Converter<'a> {
         }
     }
 
-    /// 模块对外成员里的 mixin（自己的全局帧 + `@forward` 链，前缀/过滤规则同变量）。
+    /// A mixin among a module's exported members (its own global frame + the `@forward`
+    /// chain; prefix/filter rules are the same as for variables).
     fn export_mixin(&self, scope: usize, name: &str, depth: usize) -> Option<MixinDef<'a>> {
         const MAX_FORWARD_DEPTH: usize = 32;
         if depth > MAX_FORWARD_DEPTH {
@@ -140,7 +145,7 @@ impl<'a> Converter<'a> {
         })
     }
 
-    /// `@include` 的目标名：`m` 或 `ns.m`。
+    /// Target name of `@include`: `m` or `ns.m`.
     fn mixin_name(
         &self,
         include: &SassInclude<'a>,
@@ -154,14 +159,18 @@ impl<'a> Converter<'a> {
                 let member = match &q.member {
                     SassModuleMemberName::Ident(ident) => ident.name.to_string(),
                     _ => {
-                        return Err(
-                            self.err(q.span.start, "SCSS 特性尚未实现（S2）: 插值 mixin 名")
-                        );
+                        return Err(self.err(
+                            q.span.start,
+                            "SCSS feature not implemented yet (S2): interpolated mixin name",
+                        ));
                     }
                 };
                 Ok((member, Some(q.module.name.to_string())))
             }
-            _ => Err(self.err(at, "SCSS 特性尚未实现（S2）: 插值 mixin 名")),
+            _ => Err(self.err(
+                at,
+                "SCSS feature not implemented yet (S2): interpolated mixin name",
+            )),
         }
     }
 
@@ -174,11 +183,11 @@ impl<'a> Converter<'a> {
         nested: &mut Vec<Item>,
     ) -> Result<(), Box<CompileError>> {
         let Some(AtRulePrelude::SassInclude(include)) = &at.prelude else {
-            return Err(self.err(at.span.start, "SCSS 解析失败: @include"));
+            return Err(self.err(at.span.start, "SCSS parse failure: @include"));
         };
         let at_pos = at.span.start;
         if include.content_block_params.is_some() && at.block.is_none() {
-            // dart 要求 `using (...)` 后面必须跟块（否则就是语法错误）。
+            // dart requires a block after `using (...)` (otherwise it is a syntax error).
             let end = include
                 .content_block_params
                 .as_ref()
@@ -240,7 +249,8 @@ impl<'a> Converter<'a> {
 
         let saved_cursor = self.cursor;
         self.eval.enter(def.scope);
-        // 同 scope：把帧栈截到定义深度，多出来的部分交给 content 块保管。
+        // Same scope: truncate the frame stack to the definition depth; the extra part
+        // is kept by the content block.
         let (mut frames_tail, mut mixins_tail) = if def.scope == caller_scope {
             self.detach_frames(def.scope, def.depth)
         } else {
@@ -255,7 +265,8 @@ impl<'a> Converter<'a> {
             Err(e) => Err(e),
             Ok(check) => {
                 rest_check = check;
-                // mixin 体的注释用定义处的窗口，结束后恢复调用处的游标。
+                // Comments of the mixin body use the window at the definition site; the
+                // cursor of the call site is restored afterwards.
                 self.cursor = self.comment_cursor(def.body_span.start);
                 let slot = content_block.map(|mut block| {
                     block.tail = std::mem::take(&mut frames_tail);
@@ -288,7 +299,8 @@ impl<'a> Converter<'a> {
                 r
             }
         };
-        // content 块里对调用方局部变量的修改带回调用方环境。
+        // Changes to the caller's local variables made inside the content block are
+        // carried back to the caller's environment.
         if pushed {
             if let Some(Some(index)) = self.content.pop() {
                 let block = &mut self.content_blocks[index];
@@ -301,14 +313,16 @@ impl<'a> Converter<'a> {
         self.eval.pop_frame();
         self.reattach_frames(def.scope, frames_tail, mixins_tail);
         self.eval.enter(caller_scope);
-        // 多余命名实参的报错晚于函数体执行（dart 实测：体里读过 keywords() 就不报）。
+        // The error for extra named arguments comes after the function body runs
+        // (observed with dart: no error when the body has read keywords()).
         result.and_then(|()| match rest_check {
             Some(check) => self.check_unknown_keywords(check, at_pos),
             None => Ok(()),
         })
     }
 
-    /// 把帧栈截到 `depth`（词法闭包的定义环境），返回被摘下的尾部，供还原。
+    /// Truncate the frame stack to `depth` (the definition environment of a lexical
+    /// closure) and return the detached tail for later restoration.
     fn detach_frames(
         &mut self,
         scope: usize,
@@ -337,19 +351,25 @@ impl<'a> Converter<'a> {
         self.mixins[scope] = mixins;
     }
 
-    /// 实参绑定（dart `ArgumentDeclaration.verify` + 绑定顺序）：
-    /// 位置实参按序填形参 → 关键字按名补位 → 默认值按声明顺序求值（可引用前面的形参）；
-    /// `$rest...` 收集多余位置实参（dart 实测：rest 不吃关键字实参）。
-    /// 绑定后的遗留检查：有 `$rest` 时，多余的命名实参先装进 ArgList，等 mixin 体（或 content
-    /// 块）跑完再决定要不要报错——dart 实测：只要有人读过关键字 map（`keywords($args)`）就不报。
-    /// 多余命名实参的报错晚于函数体执行（dart 实测：体里读过 keywords() 就不报）。
+    /// Argument binding (dart `ArgumentDeclaration.verify` + binding order):
+    /// positional arguments fill parameters in order -> keywords fill in by name ->
+    /// defaults are evaluated in declaration order (they may reference earlier
+    /// parameters); `$rest...` collects extra positional arguments (observed with
+    /// dart: rest does not take keyword arguments).
+    /// Post-binding check: with `$rest`, extra named arguments are first collected into
+    /// an ArgList, and whether to report an error is decided after the mixin body (or
+    /// content block) has run -- observed with dart: no error as long as someone has
+    /// read the keyword map (`keywords($args)`).
+    /// The error for extra named arguments comes after the function body runs (observed
+    /// with dart: no error when the body has read keywords()).
     fn check_unknown_keywords(&self, check: RestCheck, at: usize) -> Result<(), Box<CompileError>> {
         self.eval
             .check_keywords(check, at)
             .map_err(|e| self.eval_err(e))
     }
 
-    /// `@content`：在调用方（定义 content 块的）作用域里执行。
+    /// `@content`: runs in the scope of the caller (the one that defined the content
+    /// block).
     pub(super) fn content_rule(
         &mut self,
         at: &'a oxc_css_parser::ast::AtRule<'a>,
@@ -362,8 +382,9 @@ impl<'a> Converter<'a> {
             Some(AtRulePrelude::SassContent(content)) => &content.args,
             _ => &[],
         };
-        // 栈空 = 根本不在 mixin 里；`None` = 所在 mixin 调用没收到 content 块（无输出）。
-        // 普通块（`@media` / `@if`）不改变栈，所以 bootstrap 的 `color-mode()` 能透传。
+        // Empty stack = not inside a mixin at all; `None` = the enclosing mixin call
+        // got no content block (no output). Ordinary blocks (`@media` / `@if`) do not
+        // change the stack, so bootstrap's `color-mode()` can pass content through.
         let Some(slot) = self.content.pop() else {
             return Err(self.err(
                 at.span.start,
@@ -374,7 +395,8 @@ impl<'a> Converter<'a> {
             self.content.push(None);
             return Ok(());
         };
-        // 执行期间「生效中」的 content 块换成块创建时捕获的那个（dart 的 `_contentBlock`）。
+        // While executing, the "active" content block is swapped for the one captured
+        // when the block was created (dart's `_contentBlock`).
         self.content.push(self.content_blocks[index].outer);
         let inv = self
             .eval
@@ -393,7 +415,8 @@ impl<'a> Converter<'a> {
             block.head_len,
             block.cursor,
         );
-        // 换回调用方环境：摘掉 mixin 的帧，装回 content 块自己持有的那段。
+        // Switch back to the caller's environment: detach the mixin's frames and
+        // restore the segment held by the content block itself.
         self.eval.enter(scope);
         let (cur_tail, cur_mixins) = self.detach_frames(scope, head_len);
         let mut tail = std::mem::take(&mut self.content_blocks[index].tail);
@@ -417,7 +440,8 @@ impl<'a> Converter<'a> {
                 r
             }
         };
-        // 收回调用方环境的变动，再把 mixin 的帧栈装回去。
+        // Collect the changes of the caller's environment, then put the mixin's frame
+        // stack back.
         self.eval.enter(scope);
         self.mixins[scope].pop();
         self.eval.pop_frame();
@@ -427,7 +451,8 @@ impl<'a> Converter<'a> {
         block.params = params;
         block.tail = new_tail;
         block.mixins_tail = new_mixins;
-        // 恢复栈：`@content` 可以在同一个 mixin 体里出现多次。
+        // Restore the stack: `@content` may appear multiple times in the same mixin
+        // body.
         self.content.pop();
         self.content.push(Some(index));
         self.cursor = saved_cursor;
@@ -438,7 +463,8 @@ impl<'a> Converter<'a> {
         })
     }
 
-    /// `@if` / `@else if` / `@else`：只有 `false` 与 `null` 为假。正文是「半全局」作用域。
+    /// `@if` / `@else if` / `@else`: only `false` and `null` are false. The body is a
+    /// "semi-global" scope.
     pub(super) fn if_rule(
         &mut self,
         rule: &'a SassIfAtRule<'a>,
@@ -477,14 +503,14 @@ impl<'a> Converter<'a> {
         result
     }
 
-    /// `@function`：只登记定义，不产出 CSS。
+    /// `@function`: only registers the definition, emits no CSS.
     pub(super) fn define_function(
         &mut self,
         at: &'a oxc_css_parser::ast::AtRule<'a>,
     ) -> Result<(), Box<CompileError>> {
         let (Some(AtRulePrelude::SassFunction(func)), Some(block)) = (&at.prelude, &at.block)
         else {
-            return Err(self.err(at.span.start, "SCSS 解析失败: @function"));
+            return Err(self.err(at.span.start, "SCSS parse failure: @function"));
         };
         let (params, rest) = self.params(Some(&func.parameters))?;
         let def = eval::FunctionDef {
@@ -499,7 +525,8 @@ impl<'a> Converter<'a> {
         Ok(())
     }
 
-    /// 循环体一轮：注释游标回放（dart 实测：循环体里的 `/* */` 每轮都输出一次）。
+    /// One iteration of a loop body: replay the comment cursor (observed with dart: a
+    /// `/* */` in a loop body is emitted once per iteration).
     fn loop_iteration(
         &mut self,
         block: &'a SimpleBlock<'a>,
@@ -520,8 +547,9 @@ impl<'a> Converter<'a> {
         )
     }
 
-    /// `@each $v in $list` / `@each $k, $v in $map`：整个循环一个 semi-global 帧，
-    /// 每轮把绑定值写进当前帧（循环变量出循环即失效，dart 实测）。
+    /// `@each $v in $list` / `@each $k, $v in $map`: one semi-global frame for the
+    /// whole loop, with the bound values written into the current frame each
+    /// iteration (loop variables are gone once the loop ends, observed with dart).
     pub(super) fn each_rule(
         &mut self,
         at: &'a oxc_css_parser::ast::AtRule<'a>,
@@ -531,7 +559,7 @@ impl<'a> Converter<'a> {
         nested: &mut Vec<Item>,
     ) -> Result<(), Box<CompileError>> {
         let (Some(AtRulePrelude::SassEach(each)), Some(block)) = (&at.prelude, &at.block) else {
-            return Err(self.err(at.span.start, "SCSS 解析失败: @each"));
+            return Err(self.err(at.span.start, "SCSS parse failure: @each"));
         };
         let src = self.src();
         let rows = self
@@ -556,7 +584,8 @@ impl<'a> Converter<'a> {
         result
     }
 
-    /// `@for $i from ... through|to ...`：下界大于上界时**倒序**（dart 实测，不是空循环）。
+    /// `@for $i from ... through|to ...`: when the lower bound exceeds the upper bound
+    /// the loop runs **in reverse** (observed with dart; it is not an empty loop).
     pub(super) fn for_rule(
         &mut self,
         at: &'a oxc_css_parser::ast::AtRule<'a>,
@@ -566,7 +595,7 @@ impl<'a> Converter<'a> {
         nested: &mut Vec<Item>,
     ) -> Result<(), Box<CompileError>> {
         let (Some(AtRulePrelude::SassFor(spec)), Some(block)) = (&at.prelude, &at.block) else {
-            return Err(self.err(at.span.start, "SCSS 解析失败: @for"));
+            return Err(self.err(at.span.start, "SCSS parse failure: @for"));
         };
         let inclusive = matches!(spec.boundary.kind, SassForBoundaryKind::Inclusive);
         let src = self.src();
@@ -590,7 +619,7 @@ impl<'a> Converter<'a> {
         result
     }
 
-    /// `@while`：条件每轮重新求值。
+    /// `@while`: the condition is re-evaluated on every iteration.
     pub(super) fn while_rule(
         &mut self,
         at: &'a oxc_css_parser::ast::AtRule<'a>,
@@ -600,7 +629,7 @@ impl<'a> Converter<'a> {
         nested: &mut Vec<Item>,
     ) -> Result<(), Box<CompileError>> {
         let (Some(AtRulePrelude::SassExpr(cond)), Some(block)) = (&at.prelude, &at.block) else {
-            return Err(self.err(at.span.start, "SCSS 解析失败: @while"));
+            return Err(self.err(at.span.start, "SCSS parse failure: @while"));
         };
         self.control_depth += 1;
         let scope = self.push_scope(true);

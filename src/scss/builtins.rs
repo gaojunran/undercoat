@@ -1,14 +1,16 @@
-//! Sass 全局内置函数（dart-sass 1.35.2 的 legacy 函数表）。
+//! Sass global built-in functions (dart-sass 1.35.2's legacy function table).
 //!
-//! 表外的名字一律返回 `None`，由调用方**原样透传为纯 CSS**——这条边界很重要：
-//! `sqrt(2)` / `getCssVar(--x)` 之类必须原样出现在产物里，不能因为「有函数表」就报错。
-//! 表内的函数严格按 dart 语义求值，参数绑定（位置 / 关键字 / 默认值）与 `@function`
-//! 共用规则。
+//! Names outside the table always return `None`, and the caller **passes them through
+//! as plain CSS** -- this boundary matters:
+//! something like `sqrt(2)` / `getCssVar(--x)` must appear verbatim in the output and
+//! must not error just because "a function table exists".
+//! Functions inside the table are evaluated strictly by dart's semantics; argument
+//! binding (positional / keyword / default) shares the rules of `@function`.
 
 use crate::scss::color_space::Space;
 use crate::scss::value::{self, Color, List, Map, Number, SassStr, Sep, ValResult, Value};
 
-/// 一次内置函数调用的形参绑定结果。
+/// Result of binding the parameters of one built-in function call.
 pub(crate) struct Args {
     params: &'static [&'static str],
     values: Vec<Option<Value>>,
@@ -45,11 +47,11 @@ impl Args {
                 }
             }
         }
-        // 多余位置实参。
+        // Extra positional arguments.
         if positional.len() > params.len() {
             return Err(too_many(params.len(), positional.len()));
         }
-        // 未知关键字实参。
+        // Unknown keyword arguments.
         let unknown = keywords
             .iter()
             .zip(&used)
@@ -97,8 +99,9 @@ impl Args {
         self.req(i)?.assert_string(self.params[i])
     }
 
-    /// 同 `string`，但把 `calc(...)` 这类「无法求值的函数」按其字面文本当成
-    /// 未加引号字符串（dart 的 `type-of(calc(...))` 就是 `string`）。
+    /// Same as `string`, but a "function that cannot be evaluated" such as `calc(...)`
+    /// is treated as an unquoted string of its literal text (dart's
+    /// `type-of(calc(...))` is `string`).
     pub(crate) fn string_owned(&self, i: usize) -> ValResult<SassStr> {
         match self.req(i)? {
             Value::Str(text) => Ok(text.clone()),
@@ -124,37 +127,40 @@ fn too_many(allowed: usize, passed: usize) -> String {
     )
 }
 
-/// 实参个数与文案里的函数名。
+/// Argument count and the function name used in the message.
 macro_rules! args {
     ($params:expr, $positional:expr, $keywords:expr) => {
         Args::new($params, $positional, $keywords)?
     };
 }
 
-/// 某个名字是不是内置函数（`function-exists()` 用）。空实参调用一次即可判定：
-/// 内置函数会报「缺参数」，未知名字返回 `Ok(None)`。
+/// Whether a name is a built-in function (used by `function-exists()`). Calling it once
+/// with no arguments decides it: a built-in reports "missing argument", an unknown name
+/// returns `Ok(None)`.
 pub(crate) fn is_builtin(name: &str) -> bool {
     !matches!(call(name, &[], &[]), Ok(None))
 }
 
-/// 内置函数分派。返回 `None` 表示「不是内置函数」（调用方透传成 CSS）。
+/// Built-in function dispatch. `None` means "not a built-in function" (the caller
+/// passes it through as CSS).
 pub(crate) fn call(
     name: &str,
     positional: &[Value],
     keywords: &[(String, Value)],
 ) -> ValResult<Option<Value>> {
     let value = match name {
-        // ---- 颜色构造 ----
+        // ---- color construction ----
         "rgb" | "rgba" => rgb(name, positional, keywords)?,
         "hsl" | "hsla" => hsl(name, positional, keywords)?,
-        // 现代颜色空间构造（1.35.2 里是 CSS 透传，1.93.2 是真正的颜色值）。
+        // Modern color space construction (in 1.35.2 this is CSS passthrough, in 1.93.2 it
+        // is a real color value).
         "hwb" => modern_color("hwb", positional, keywords)?,
         "lab" => modern_color("lab", positional, keywords)?,
         "lch" => modern_color("lch", positional, keywords)?,
         "oklab" => modern_color("oklab", positional, keywords)?,
         "oklch" => modern_color("oklch", positional, keywords)?,
         "color" => modern_color("color", positional, keywords)?,
-        // ---- 颜色调整 ----
+        // ---- color adjustment ----
         "mix" => mix(positional, keywords)?,
         "lighten" => lighten(positional, keywords)?,
         "darken" => darken(positional, keywords)?,
@@ -177,17 +183,18 @@ pub(crate) fn call(
         "lightness" => channel(positional, keywords, Channel::Lightness)?,
         "alpha" | "opacity" => alpha(positional, keywords)?,
         "ie-hex-str" => ie_hex_str(positional, keywords)?,
-        // ---- 数字 ----
+        // ---- numbers ----
         "percentage" => percentage(positional, keywords)?,
         "round" | "ceil" | "floor" | "abs" => round_like(name, positional, keywords)?,
         "unit" => unit(positional, keywords)?,
         "unitless" => unitless(positional, keywords)?,
         "comparable" => comparable(positional, keywords)?,
-        // `min()` / `max()` 只在实参能当纯 CSS 数学函数解析时透传（见 `eval`），
-        // 其余情况（`min($a, 2)`）走这里的 Sass 语义。
+        // `min()` / `max()` are only passed through when the arguments parse as a plain
+        // CSS math function (see `eval`); other cases (`min($a, 2)`) use the Sass
+        // semantics here.
         "min" | "max" => min_max(name, positional, keywords)?,
         "clamp" => clamp(positional, keywords)?,
-        // ---- 字符串 ----
+        // ---- strings ----
         "str-length" => str_length(positional, keywords)?,
         "str-slice" => str_slice(positional, keywords)?,
         "str-index" => str_index(positional, keywords)?,
@@ -224,7 +231,8 @@ pub(crate) fn call(
     Ok(Some(value))
 }
 
-/// 旧的「值即实参」入口（`value::function_value` 用）：只有一个逗号 list 时按位置拆分。
+/// The old "value is the arguments" entry point (used by `value::function_value`):
+/// split positionally when there is a single comma list.
 pub(crate) fn call_value(name: &str, args: &Value) -> ValResult<Option<Value>> {
     let positional = match args {
         Value::List(list) if list.sep == Sep::Comma => list.items.clone(),
@@ -235,7 +243,7 @@ pub(crate) fn call_value(name: &str, args: &Value) -> ValResult<Option<Value>> {
 }
 
 // ---------------------------------------------------------------------------
-// 数字
+// numbers
 // ---------------------------------------------------------------------------
 
 fn percentage(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
@@ -290,11 +298,11 @@ fn comparable(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<V
 }
 
 // ---------------------------------------------------------------------------
-// 字符串
+// strings
 // ---------------------------------------------------------------------------
 
-/// `min()` / `max()` 的 Sass 语义（dart 的 `_minMax`）：实参不是数字（或单位不可比）
-/// 时报错，而不是退化成字符串。
+/// Sass semantics of `min()` / `max()` (dart's `_minMax`): an error when an argument is
+/// not a number (or the units are incomparable), instead of degrading to a string.
 fn min_max(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
     if let Some((name, _)) = keywords.first() {
         return Err(format!("No argument named ${name}."));
@@ -325,8 +333,9 @@ fn min_max(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> Va
     }
 }
 
-/// `clamp($min, $number, $max)` = `max($min, min($number, $max))`（dart 的 `_clamp`）。
-/// 单位不可比时报错，调用方（CSS 数学函数路径）据此退化成纯 CSS 透传。
+/// `clamp($min, $number, $max)` = `max($min, min($number, $max))` (dart's `_clamp`).
+/// Incomparable units are an error, and the caller (the CSS math function path)
+/// degrades to plain CSS passthrough based on it.
 fn clamp(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
     let args = args!(&["min", "number", "max"], positional, keywords);
     let (low, number, high) = (args.number(0)?, args.number(1)?, args.number(2)?);
@@ -497,7 +506,7 @@ fn index(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value>
     Ok(
         match items
             .iter()
-            .position(|item| value::values_equal(item, args.req(1).expect("已校验")))
+            .position(|item| value::values_equal(item, args.req(1).expect("validated")))
         {
             Some(i) => Value::Number(Number::unitless(i as f64 + 1.0)),
             None => Value::Null,
@@ -540,7 +549,8 @@ fn join(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> 
     }))
 }
 
-/// `$separator`：`auto` 跟随第一个 list，`comma` / `space` / `slash` 显式指定。
+/// `$separator`: `auto` follows the first list, while `comma` / `space` / `slash` are
+/// explicit.
 fn separator(args: &Args, index: usize, list: &Value) -> ValResult<Sep> {
     match args.at(index) {
         None => Ok(match list {
@@ -562,7 +572,7 @@ fn separator(args: &Args, index: usize, list: &Value) -> ValResult<Sep> {
 }
 
 fn zip(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
-    // dart 的签名是 `zip($lists...)`：所有位置实参都是 list。
+    // dart's signature is `zip($lists...)`: every positional argument is a list.
     if let Some((name, _)) = keywords.first() {
         return Err(format!("No argument named ${name}."));
     }
@@ -699,7 +709,7 @@ fn map_values(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<V
 }
 
 fn map_remove(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
-    // dart 的签名是 `map-remove($map, $keys...)`。
+    // dart's signature is `map-remove($map, $keys...)`.
     if let Some((name, _)) = keywords.first() {
         return Err(format!("No argument named ${name}."));
     }
@@ -731,7 +741,8 @@ fn type_of(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Valu
         Value::List(_) => "list",
         Value::Map(_) => "map",
         Value::ArgList(_) => "arglist",
-        // dart 把这些「写进 CSS 的函数」都当作字符串（`calc` / `min` / 未知函数）。
+        // dart treats all these "functions written into CSS" as strings (`calc` / `min` /
+        // unknown functions).
         Value::Function(_) => "string",
         Value::FuncRef(_) => "function",
         Value::Raw(_) => "string",
@@ -739,7 +750,8 @@ fn type_of(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Valu
     Ok(Value::Str(SassStr::unquoted(name)))
 }
 
-/// `feature-exists()`：1.35.2 只认这五个（`module` 返回 false，是兼容探针）。
+/// `feature-exists()`: 1.35.2 only recognizes these five (`module` returns false; it is
+/// a compatibility probe).
 fn feature_exists(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
     let args = args!(&["feature"], positional, keywords);
     let feature = &args.string(0)?.text;
@@ -790,11 +802,12 @@ fn keywords_map(positional: &[Value], keywords: &[(String, Value)]) -> ValResult
 }
 
 // ---------------------------------------------------------------------------
-// 颜色
+// colors
 // ---------------------------------------------------------------------------
 
-/// dart `SassString.isSpecialNumber` 的前缀集合：颜色函数的实参只要命中一个，
-/// 整个调用就透传成纯 CSS（bootstrap 大量使用 `rgb(var(--x))`）。
+/// The set of prefixes of dart's `SassString.isSpecialNumber`: as soon as an argument of
+/// a color function matches one, the whole call passes through as plain CSS
+/// (bootstrap uses `rgb(var(--x))` extensively).
 const SPECIAL_NUMBERS: [&str; 6] = ["calc(", "clamp(", "var(", "env(", "max(", "min("];
 
 fn is_special(value: &Value) -> bool {
@@ -818,7 +831,8 @@ fn is_var(value: &Value) -> bool {
     }
 }
 
-/// dart 的 `_functionString`：`name(a, b)`，实参按 inspect 形态用逗号加空格分开。
+/// dart's `_functionString`: `name(a, b)`, with arguments separated by comma + space in
+/// inspect form.
 fn function_string(name: &str, items: &[Value]) -> Value {
     Value::Raw(format!(
         "{name}({})",
@@ -833,14 +847,16 @@ fn function_string(name: &str, items: &[Value]) -> Value {
 struct ColorArgs {
     items: Vec<Value>,
     alpha: Option<Value>,
-    /// 空格分隔写法（`rgb(0 0 0 / 50%)`）：最多只能 3 个元素。
+    /// Space-separated form (`rgb(0 0 0 / 50%)`): at most 3 elements.
     space: bool,
-    /// 末项是带 `/` 的字符串（`0/var(--o)`）：整条调用透传成纯 CSS。
+    /// The last item is a string containing `/` (`0/var(--o)`): the whole call passes
+    /// through as plain CSS.
     slash_text: bool,
 }
 
 impl ColorArgs {
-    /// `0 0 0 / 50%`：空格 list 的末项是「斜杠数」`0/50%`，右边就是 alpha。
+    /// `0 0 0 / 50%`: the last item of the space list is the "slash number" `0/50%`, whose
+    /// right side is the alpha.
     fn from_value(args: &Value) -> Self {
         match args {
             Value::List(list) if list.sep == Sep::Space => {
@@ -864,8 +880,9 @@ impl ColorArgs {
                         }
                     }
                     None => {
-                        // `rgb(0 0 0 / var(--o))`：末项不是数字而是 `0/var(--o)` 这样的
-                        // 字符串，dart 直接把整条调用当 CSS 输出。
+                        // `rgb(0 0 0 / var(--o))`: the last item is not a number but a
+                        // string like `0/var(--o)`, and dart directly outputs the whole call
+                        // as CSS.
                         let slash_text = matches!(
                             items.last(),
                             Some(Value::Str(s)) if !s.quoted && s.text.contains('/')
@@ -894,8 +911,9 @@ impl ColorArgs {
         }
     }
 
-    /// 通道个数校验：逗号写法最多 4 个实参，空格写法只能 3 个元素
-    /// （alpha 必须跟在 `/` 后面），两者的文案不同（argument / element）。
+    /// Channel count check: the comma form takes at most 4 arguments, the space form only
+    /// 3 elements (alpha must follow `/`), and the two messages differ
+    /// (argument / element).
     fn check_count(&self, names: [&str; 3]) -> ValResult<()> {
         let (max, kind) = if self.space {
             (3, "element")
@@ -919,8 +937,9 @@ impl ColorArgs {
     }
 }
 
-/// 颜色函数的参数没有「函数签名」，dart 直接在 `_rgb` / `_hsl` 里读实参，
-/// 所以这里绕过 `Args`（它要求固定形参表）。
+/// The arguments of color functions have no "function signature"; dart reads them
+/// directly in `_rgb` / `_hsl`, so this bypasses `Args` (which requires a fixed
+/// parameter list).
 fn color_call_args(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
     if keywords.is_empty() {
         return Ok(match positional {
@@ -937,7 +956,8 @@ fn color_call_args(positional: &[Value], keywords: &[(String, Value)]) -> ValRes
             }),
         });
     }
-    // 关键字实参：按 dart 的形参名拼回位置序列（`rgb($red: 1, $green: 2, $blue: 3)`）。
+    // Keyword arguments: rebuild the positional sequence by dart's parameter names
+    // (`rgb($red: 1, $green: 2, $blue: 3)`).
     const RGB: [&str; 4] = ["red", "green", "blue", "alpha"];
     const HSL: [&str; 4] = ["hue", "saturation", "lightness", "alpha"];
     let names = if keywords
@@ -971,12 +991,13 @@ fn rgb(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> ValRes
     if args.slash_text {
         return Ok(function_string(name, &[channels]));
     }
-    // `rgba($color, $alpha)` 两实参形态（dart 的 `_rgbTwoArg`）。
+    // The two-argument form `rgba($color, $alpha)` (dart's `_rgbTwoArg`).
     if name == "rgba" && args.items.len() == 2 && args.alpha.is_none() && !args.space {
         return rgba_two_arg(name, &args.items);
     }
-    // 特殊数字（`var()` / `calc()` / `env()` / `min()` …）整条透传为纯 CSS；
-    // 这个判定在参数个数校验之前（dart 实测：`rgb(var(--x))` 不报缺参数）。
+    // Special numbers (`var()` / `calc()` / `env()` / `min()` …) make the whole call pass
+    // through as plain CSS; this check comes before the argument count check (observed
+    // with dart: `rgb(var(--x))` does not report a missing argument).
     if args.all().any(is_special) {
         return Ok(function_string(
             name,
@@ -1006,7 +1027,8 @@ fn rgb(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> ValRes
 fn rgba_two_arg(name: &str, items: &[Value]) -> ValResult<Value> {
     let (first, second) = (&items[0], &items[1]);
     let passthrough = || function_string(name, items);
-    // `rgba($color, …)` 的通道按未取整值输出（dart：`rgba(253.04, 253.32, 253.6, …)`）。
+    // The channels of `rgba($color, …)` are output unrounded (dart:
+    // `rgba(253.04, 253.32, 253.6, …)`).
     let channels = |color: &Color| {
         let (r, g, b) = color.channels_f64();
         format!(
@@ -1052,8 +1074,8 @@ fn rgba_two_arg(name: &str, items: &[Value]) -> ValResult<Value> {
     }))
 }
 
-/// `lab()` / `oklch()` / `color(display-p3 …)` / `hwb(…)`：通道按显示单位存，
-/// `none` 映射成 missing（现代 CSS 语义）。
+/// `lab()` / `oklch()` / `color(display-p3 …)` / `hwb(…)`: channels are stored in display
+/// units, and `none` maps to missing (modern CSS semantics).
 fn modern_color(
     name: &str,
     positional: &[Value],
@@ -1061,8 +1083,9 @@ fn modern_color(
 ) -> ValResult<Value> {
     let args = color_call_args(positional, keywords)?;
     let args = ColorArgs::from_value(&args);
-    // 实参里有 `var()` / `env()` / `min()` 之类：整条调用是纯 CSS，原样透传
-    // （`color(var(--x))` 不是「在现代颜色空间 x 里构造颜色」）。
+    // An argument like `var()` / `env()` / `min()` makes the whole call plain CSS that is
+    // passed through verbatim (`color(var(--x))` does not mean "construct a color in the
+    // modern color space x").
     if args.items.iter().any(is_special) {
         return Ok(function_string(name, &args.items));
     }
@@ -1080,7 +1103,7 @@ fn modern_color(
         items.remove(0);
         space
     } else {
-        Space::from_name(name).expect("构造器名就是空间名")
+        Space::from_name(name).expect("the constructor name is the space name")
     };
     let mut channels = [None; 3];
     for (index, slot) in channels.iter_mut().enumerate() {
@@ -1090,7 +1113,8 @@ fn modern_color(
                 None
             }
             Some(Value::Number(number)) => {
-                // `oklab`/`oklch` 的 lightness 用 0..1 的无单位数（`50%` 才是 0..100）。
+                // The lightness of `oklab`/`oklch` uses an unitless number in 0..1 (`50%`
+                // maps to 0..100).
                 Some(
                     if index == 0
                         && matches!(space, Space::Oklab | Space::Oklch)
@@ -1232,7 +1256,7 @@ fn darken(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value
 }
 
 fn saturate(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
-    // `saturate(50%)` 是 CSS filter：单实参且不是颜色时原样透传。
+    // `saturate(50%)` is a CSS filter: with a single non-color argument, pass it through.
     if positional.len() == 1 && keywords.is_empty() && !matches!(positional[0], Value::Color(_)) {
         return Ok(function_string("saturate", positional));
     }
@@ -1265,7 +1289,7 @@ fn adjust_hue(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<V
 }
 
 fn grayscale(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
-    // `grayscale(50%)` 是 CSS filter。
+    // `grayscale(50%)` is a CSS filter.
     if positional.len() == 1 && keywords.is_empty() && !matches!(positional[0], Value::Color(_)) {
         return Ok(function_string("grayscale", positional));
     }
@@ -1286,7 +1310,7 @@ fn complement(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<V
 fn invert(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
     let args = args!(&["color", "weight"], positional, keywords);
     let Some(Value::Color(color)) = args.at(0) else {
-        // `invert(0.5)` 之类是 CSS filter：原样透传。
+        // `invert(0.5)` and the like are CSS filters: pass them through verbatim.
         return Ok(function_string(
             "invert",
             &positional[..positional.len().min(1)],
@@ -1333,7 +1357,8 @@ fn transparentize(positional: &[Value], keywords: &[(String, Value)]) -> ValResu
     }))
 }
 
-/// `adjust-color` / `change-color` / `scale-color`：只有 `$color` 可以按位置传。
+/// `adjust-color` / `change-color` / `scale-color`: only `$color` may be passed
+/// positionally.
 #[derive(Clone, Copy, PartialEq)]
 enum Mode {
     Adjust,
@@ -1505,7 +1530,8 @@ fn adjust_color(
     Ok(Value::Color(Color::new(r, g, b, a)))
 }
 
-/// `adjust-color` 的增量语义：`$hue` 是角度，其余是裸数字；`scale-color` 用百分比。
+/// Increment semantics of `adjust-color`: `$hue` is an angle and the rest are bare
+/// numbers; `scale-color` uses percentages.
 fn component(key: &str, value: &Value, mode: Mode) -> ValResult<f64> {
     let number = value.assert_number(key)?;
     Ok(match mode {
@@ -1522,7 +1548,8 @@ fn component(key: &str, value: &Value, mode: Mode) -> ValResult<f64> {
         }
         Mode::Change => number.value,
         Mode::Adjust => {
-            // `$hue` 可以带角度单位；saturation/lightness 是百分数但 dart 只取数值。
+            // `$hue` may carry an angle unit; saturation/lightness are percentages but dart
+            // only takes the numeric part.
             if value::names_eq(key, "hue") {
                 number.angle_degrees(key)?
             } else {
@@ -1540,7 +1567,7 @@ fn scale_channel(current: f64, scale: f64, max: f64, min: f64) -> f64 {
     }
 }
 
-/// HWB 三分量（`h` 度数，`w`/`b` 百分比）。
+/// HWB three components (`h` in degrees, `w`/`b` percentages).
 struct Hwb {
     h: f64,
     w: f64,
@@ -1558,7 +1585,7 @@ impl Hwb {
         }
     }
 
-    /// `w + b > 100%` 时按比例归一化（CSS HWB 的规则，dart 同样处理）。
+    /// Normalize proportionally when `w + b > 100%` (the CSS HWB rule; dart does the same).
     fn to_color(&self, alpha: f64) -> Color {
         let (mut w, mut b) = (self.w / 100.0, self.b / 100.0);
         if w + b > 1.0 {
@@ -1623,7 +1650,8 @@ fn channel(positional: &[Value], keywords: &[(String, Value)], which: Channel) -
 }
 
 fn alpha(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
-    // `alpha(opacity=50)` / `opacity(0.5)` 是 CSS：非颜色时原样透传。
+    // `alpha(opacity=50)` / `opacity(0.5)` are CSS: pass them through verbatim when not a
+    // color.
     if positional.len() == 1 && keywords.is_empty() && !matches!(positional[0], Value::Color(_)) {
         return Ok(function_string("alpha", positional));
     }
@@ -1641,7 +1669,8 @@ fn ie_hex_str(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<V
     ))))
 }
 
-/// HSL 表示：色相是度，饱和度/亮度是 **0..100 的百分数**（与 dart 的 `SassColor` 一致）。
+/// HSL representation: hue in degrees, saturation/lightness as **percentages in
+/// 0..100** (consistent with dart's `SassColor`).
 struct Hsl {
     h: f64,
     s: f64,
@@ -1650,8 +1679,9 @@ struct Hsl {
 
 impl Hsl {
     fn from_color(color: &Color) -> Self {
-        // HSL 运算产出的颜色保留原始分量：`darken(darken(#fff, 3%), 5%)` 里第二
-        // 步用的是 97% 而不是从 #f7f7f7 反推的 96.86%（dart 实测）。
+        // Colors produced by HSL operations keep the original components: in
+        // `darken(darken(#fff, 3%), 5%)` the second step uses 97% rather than the 96.86%
+        // derived back from #f7f7f7 (observed with dart).
         if let Some((h, s, l)) = color.hsl {
             return Self { h, s, l };
         }
@@ -1674,7 +1704,8 @@ impl Hsl {
     }
 }
 
-/// HSL → RGB（`h` 是度，`s`/`l` 是 0..1），与 dart 的 `SassColor.hsl` 同款公式。
+/// HSL -> RGB (`h` in degrees, `s`/`l` in 0..1), the same formula as dart's
+/// `SassColor.hsl`.
 fn hsl_to_rgb(hue: f64, s: f64, l: f64) -> (f64, f64, f64) {
     let h = hue.rem_euclid(360.0) / 360.0;
     let s = s.clamp(0.0, 1.0);
@@ -1704,8 +1735,9 @@ fn hsl_to_rgb(hue: f64, s: f64, l: f64) -> (f64, f64, f64) {
     )
 }
 
-/// RGB（0..1）→ HSL，`h` 是度，`s`/`l` 是 0..1。公式逐行对齐 dart 的
-/// `SassColor.rgbToHsl`（用 `==` 而不是容差比：近白颜色对尾数极敏感）。
+/// RGB (0..1) -> HSL, `h` in degrees and `s`/`l` in 0..1. The formula follows dart's
+/// `SassColor.rgbToHsl` line by line (using `==` instead of a tolerance comparison:
+/// near-white colors are extremely sensitive to the mantissa).
 fn rgb_to_hsl(r: f64, g: f64, b: f64) -> (f64, f64, f64) {
     let max = r.max(g).max(b);
     let min = r.min(g).min(b);

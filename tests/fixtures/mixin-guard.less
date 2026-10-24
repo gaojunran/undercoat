@@ -1,4 +1,4 @@
-// guard 比较（单位感知）、逻辑组合、真值、类型判断与 default()
+// guard comparisons (unit-aware), logical combinations, truthiness, type checks and default()
 .mixin(@a) when (@a = 4) {
   eq: number;
 }
@@ -87,7 +87,7 @@
   .type(50%);
 }
 
-// default()：非 default 命中则 default 不展开
+// default(): when a non-default overload matches, default is not expanded
 .d(@x) when (@x = 1) {
   case: one;
 }

@@ -1,4 +1,4 @@
-// 颜色函数 HSL 往返后的取整（B3）
+// rounding after an HSL round trip in color functions (B3)
 @brand: #337ab7;
 @brand-dark: darken(#428bca, 6.5%);
 
@@ -26,7 +26,7 @@
 .h {
   color: fadeout(@brand, 10%);
 }
-// 链式调用必须保留中间浮点通道
+// chained calls must keep the intermediate fractional channels
 .i {
   color: @brand-dark;
 }

@@ -1,4 +1,4 @@
-// 链式：a extend b、b extend c 时闭包求值（扩展的扩展）
+// chaining: when a extends b and b extends c, evaluate the closure (extend of an extend)
 .c {
   width: 1px;
 }
@@ -8,7 +8,7 @@
 .a:extend(.b) {
   color: red;
 }
-// 反向声明顺序：扩展定义在目标之前也成立
+// reverse declaration order: extending still works when the extend comes before the target
 .late:extend(.mid) {
   a: 1;
 }
@@ -18,7 +18,7 @@
 .early {
   c: 3;
 }
-// 链式 + all 混合
+// chain + all combined
 .tag {
   border: 0;
 }

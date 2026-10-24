@@ -1,7 +1,9 @@
-//! less 侧 sourcemap 的 `sourcesContent` 策略：**单源不写、多源才写**。
+//! `sourcesContent` policy of the less-side sourcemap: **omitted for a single source,
+//! written only for multiple sources**.
 //!
-//! 这与 dart 相反（`Style::sources_content`）：lessc 的 `outputSourceFiles` 只在
-//! `@import` 内联后生效，单源 `.map` 里根本没有 `sourcesContent` 字段。
+//! This is the opposite of dart (`Style::sources_content`): lessc's `outputSourceFiles`
+//! only takes effect after `@import` inlining, so a single-source `.map` has no
+//! `sourcesContent` field at all.
 
 use std::path::{Path, PathBuf};
 
@@ -23,35 +25,47 @@ fn compile(entry: &str) -> (String, serde_json::Value) {
     (out.css, map)
 }
 
-/// 单源：没有 `sourcesContent`（lessc 单源 `.map` 的字节里就没有这个字段）。
+/// Single source: no `sourcesContent` (the bytes of a single-source lessc `.map`
+/// simply don't contain this field).
 #[test]
 fn single_source_omits_sources_content() {
     let (css, map) = compile("basic.less");
     let expected = std::fs::read_to_string(fixtures_dir().join("basic.css")).expect("basic.css");
-    assert_eq!(css, expected, "单源产物也要逐字节不变");
+    assert_eq!(
+        css, expected,
+        "single-source output must stay byte-identical too"
+    );
     assert_eq!(map["sources"].as_array().expect("sources").len(), 1);
     assert!(
         map.get("sourcesContent").is_none(),
-        "less 单源 map 不该带 sourcesContent：{map}"
+        "a single-source less map should not carry sourcesContent: {map}"
     );
 }
 
-/// 多源（`@import` 内联）：`sourcesContent` 与 `sources` 一一对应，且是文件原文。
+/// Multiple sources (`@import` inlined): `sourcesContent` corresponds one-to-one with
+/// `sources` and holds the raw file text.
 #[test]
 fn imported_sources_carry_content() {
     let (css, map) = compile("import-multiple.less");
     let expected =
         std::fs::read_to_string(fixtures_dir().join("import-multiple.css")).expect("expected css");
-    assert_eq!(css, expected, "多源产物也要逐字节不变");
+    assert_eq!(
+        css, expected,
+        "multi-source output must stay byte-identical too"
+    );
 
     let sources = map["sources"].as_array().expect("sources");
     let contents = map["sourcesContent"].as_array().expect("sourcesContent");
-    assert_eq!(contents.len(), sources.len(), "两者必须一一对应");
-    // 至少内联进来的 `imports/part.less` 原文能在 map 里找到。
+    assert_eq!(
+        contents.len(),
+        sources.len(),
+        "the two must correspond one-to-one"
+    );
+    // At least the inlined `imports/part.less` text must be findable in the map.
     let part = std::fs::read_to_string(fixtures_dir().join("imports/part.less")).expect("part");
     let found = contents.iter().any(|c| c.as_str() == Some(part.as_str()));
     assert!(
         found,
-        "sourcesContent 里找不到被内联文件的原文：{contents:?}"
+        "cannot find the inlined file's text in sourcesContent: {contents:?}"
     );
 }

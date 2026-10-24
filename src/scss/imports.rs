@@ -1,12 +1,16 @@
-//! SCSS 文件装配：`@import` 文本级内联 + `@use` 模块加载。
+//! SCSS file assembly: text-level inlining of `@import` + module loading of `@use`.
 //!
-//! 装配产物是一段**合并文本**外加一张分段表（[`crate::merge::Seg`]），每个分段映射回
-//! 「哪个文件 + 文件内偏移」。后续所有阶段（求值、打印、sourcemap）都只看
-//! 合并文本的偏移，出错时再由分段表换算出文件与行列。
+//! The product is a piece of **merged text** plus a segment table
+//! ([`crate::merge::Seg`]) that maps every segment back to "which file + offset inside
+//! the file". All later stages (evaluation, printing, sourcemap) only look at offsets
+//! in the merged text, and the segment table converts them back to file/line/column on
+//! error.
 //!
-//! 为什么是文本级：`@import` 的语义就是「把文件内容原样搬到这个位置、共享
-//! 作用域」，splice 之后嵌套与变量共享都自然成立；`@use` 则相反，模块有独立
-//! 作用域、CSS 只输出一次，所以这里只负责把模块内容排到依赖者之前并登记去重表。
+//! Why text level: the semantics of `@import` are "move the file content verbatim to
+//! this position and share the scope", so after splicing, nesting and variable sharing
+//! hold naturally; `@use` is the opposite -- a module has its own scope and its CSS is
+//! emitted only once, so here we only place module content before its dependents and
+//! register a deduplication table.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -20,7 +24,7 @@ use crate::{CompileError, LineIndex, Options};
 
 use super::indented;
 
-/// `@use` 加载到的模块：文件 id 与独立作用域编号。
+/// A module loaded by `@use`: file id and the id of its own scope.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ModuleInfo {
     pub(crate) file: u32,
@@ -31,9 +35,9 @@ pub(crate) struct Loaded {
     pub(crate) merged: Merged,
     pub(crate) deps: Vec<String>,
     pub(crate) modules: HashMap<PathBuf, ModuleInfo>,
-    /// 文件 id → 作用域编号（`@import` 内联的文件沿用导入者的作用域）。
+    /// File id -> scope id (files inlined by `@import` keep the importer's scope).
     pub(crate) scope_of: HashMap<u32, usize>,
-    /// 作用域个数（0 = 根文件）。
+    /// Number of scopes (0 = the root file).
     pub(crate) scopes: usize,
 }
 
@@ -54,7 +58,7 @@ impl ResolveError {
             }
             ResolveError::NotFound => {
                 if url.starts_with("sass:") {
-                    format!("SCSS 特性尚未实现（S1）: 内置模块 @use \"{url}\"")
+                    format!("SCSS feature not implemented yet (S1): built-in module @use \"{url}\"")
                 } else {
                     "Can't find stylesheet to import.".to_string()
                 }
@@ -66,9 +70,9 @@ impl ResolveError {
 pub(crate) struct Loader<'a> {
     opts: &'a Options,
     root: PathBuf,
-    /// 入口文件的在内存文本（`compile(.., source, ..)` 不落盘）。
+    /// In-memory text of the entry file (`compile(.., source, ..)` does not touch disk).
     entry: String,
-    /// 已登记的文件与合并串（`run` 时拼装）。
+    /// Files registered so far and the merged text (assembled during `run`).
     merged: Merged,
     deps: Vec<String>,
     modules: HashMap<PathBuf, ModuleInfo>,
@@ -116,11 +120,13 @@ impl<'a> Loader<'a> {
     }
 
     fn read(&self, path: &Path) -> Result<String, Box<CompileError>> {
-        std::fs::read_to_string(path)
-            .map_err(|e| CompileError::new(format!("读取 {} 失败: {e}", path.display())).into())
+        std::fs::read_to_string(path).map_err(|e| {
+            CompileError::new(format!("Failed to read {}: {e}", path.display())).into()
+        })
     }
 
-    /// 一个文件的完整内容（`@use` 依赖在前，随后是自身语句）；返回文件 id 与片段。
+    /// Full content of one file (`@use` dependencies first, then its own statements);
+    /// returns the file id and the segment.
     fn pieces_for(
         &mut self,
         path: &Path,
@@ -144,8 +150,10 @@ impl<'a> Loader<'a> {
         self.scope_of.entry(id).or_insert(scope);
         let dir = path.parent().unwrap_or(Path::new(".")).to_path_buf();
 
-        // `.sass` 缩进语法在装载期折成等义 SCSS：整条流水线只面对 SCSS 文本。
-        // 改写不增删行，所以下面的偏移仍可按**原文**换算行列。
+        // The `.sass` indented syntax is folded into equivalent SCSS at load time: the
+        // whole pipeline only ever sees SCSS text.
+        // The rewrite neither adds nor removes lines, so the offsets below can still be
+        // mapped to line/column through the **original** text.
         let indented = is_indented(path);
         let converted;
         let scss = if indented {
@@ -178,20 +186,24 @@ impl<'a> Loader<'a> {
             )
         })?;
 
-        // 先解析全部 prelude：只要文件里出现 `with` 配置或 `@forward`，依赖就要装到
-        // **语句位置**（而不是整个文件之前），这样配置表达式先于模块体求值、
-        // `@forward` 也能在目标模块求值前登记转发边。
+        // Parse all preludes first: as soon as a file contains a `with` configuration or
+        // a `@forward`, the dependency must be placed at the **statement position** (not
+        // before the whole file), so that configuration expressions are evaluated before
+        // the module body and `@forward` can register the forward edge before the target
+        // module is evaluated.
         let mut sites: Vec<(Span, ModuleSpec<'_>, bool)> = Vec::new();
-        // 命名空间重名是**每个文件一次**的静态检查（dart 的 `_environment.namespaces`）：
-        // 同一个文件里两个 `@use` 声明同一命名空间才报错；`@import` 内联的多个文件
-        // 各自 `@use` 同一个名字是合法的。
+        // Duplicate namespaces are a static check done **once per file** (dart's
+        // `_environment.namespaces`): an error only when two `@use` in the same file
+        // declare the same namespace; several files inlined by `@import` each using the
+        // same name is legal.
         let mut declared: Vec<String> = Vec::new();
         for span in uses {
             let raw = &scss[span.start..span.end];
             let forward = at_name(raw).eq_ignore_ascii_case("forward");
             let spec = parse_module_spec(raw, span.start)
                 .map_err(|(at, message)| self.error_at_text(path, &text, at, &message))?;
-            // 内置模块不允许配置（dart 的 `BuiltInModule` 没有配置入口）。
+            // Built-in modules cannot be configured (dart's `BuiltInModule` has no
+            // configuration entry point).
             if spec.config.is_some() && spec.path.starts_with("sass:") {
                 return Err(self.error_at_text(
                     path,
@@ -226,8 +238,9 @@ impl<'a> Loader<'a> {
         let mut prologue = Vec::new();
         let mut splices: Vec<(usize, Vec<Part>)> = Vec::new();
         for (span, spec, _) in &sites {
-            // 内置模块（`sass:math`）不落盘也不解析成文件：`@use` 语句原样留给求值器，
-            // 由 `Converter::use_rule` 注册静态成员表。
+            // A built-in module (`sass:math`) is neither on disk nor resolved as a file:
+            // the `@use` statement is left to the evaluator, and `Converter::use_rule`
+            // registers the static member table.
             if spec.path.starts_with("sass:") {
                 continue;
             }
@@ -238,7 +251,8 @@ impl<'a> Loader<'a> {
                 }
             };
             if self.modules.contains_key(&canonical(&resolved)) {
-                // 已装载的模块不能再配置（dart 的 `_moduleCache` 检查）。
+                // An already loaded module cannot be configured again (dart's
+                // `_moduleCache` check).
                 if spec.config.is_some() {
                     return Err(self.error_at_text(
                         path,
@@ -277,7 +291,8 @@ impl<'a> Loader<'a> {
         Ok((id, prologue))
     }
 
-    /// 文件正文：把 Sass `@import` 处换成被导入文件的片段，其余原文照搬。
+    /// File body: replace each Sass `@import` with the segments of the imported files
+    /// and copy the rest verbatim.
     fn body_pieces(
         &mut self,
         text: &str,
@@ -368,7 +383,8 @@ impl<'a> Loader<'a> {
         self.error_at_text(path, text, at, &err.message(url))
     }
 
-    /// 路径解析：直接候选（含 `_partial`）优先，全部不存在才看目录 index。
+    /// Path resolution: direct candidates (including `_partial`) come first; the
+    /// directory index is only tried when none of them exists.
     fn resolve(&self, dir: &Path, url: &str) -> Result<PathBuf, ResolveError> {
         resolve(dir, url, &self.opts.paths)
     }
@@ -385,7 +401,7 @@ fn push_synth(out: &mut Vec<Part>, file: u32, orig: usize, text: &str) {
     out.push(Part::source(file, format!("{text}\n"), orig));
 }
 
-/// 公开的路径解析（`@use` 在求值阶段也要按同一规则找文件）。
+/// Public path resolution (`@use` must find files by the same rules during evaluation).
 pub(crate) fn resolve(dir: &Path, url: &str, paths: &[PathBuf]) -> Result<PathBuf, ResolveError> {
     let mut roots = vec![dir.to_path_buf()];
     roots.extend(paths.iter().map(PathBuf::from));
@@ -399,17 +415,18 @@ pub(crate) fn resolve(dir: &Path, url: &str, paths: &[PathBuf]) -> Result<PathBu
     Err(ResolveError::NotFound)
 }
 
-/// 是否是 `.sass`（缩进语法）。
+/// Whether this is `.sass` (indented syntax).
 fn is_indented(path: &Path) -> bool {
     path.extension()
         .and_then(|e| e.to_str())
         .is_some_and(|e| e.eq_ignore_ascii_case("sass"))
 }
 
-/// `.scss` 解析错误：定位 + 文案（对照 dart-sass 1.93.2）。
+/// `.scss` parse error: location + message (checked against dart-sass 1.93.2).
 fn parse_error(text: &str, at: usize, kind: oxc_css_parser::error::ErrorKind) -> (usize, String) {
     use oxc_css_parser::error::ErrorKind;
-    // `.scss` 里写纯缩进：dart 把整段当成一个跨行选择器，到结尾才喊 `expected "{"`。
+    // Pure indentation written in `.scss`: dart treats the whole thing as one multi-line
+    // selector and only complains `expected "{"` at the end.
     if matches!(
         kind,
         ErrorKind::UnexpectedWhitespace | ErrorKind::UnexpectedWhitespaceOrComments
@@ -417,7 +434,7 @@ fn parse_error(text: &str, at: usize, kind: oxc_css_parser::error::ErrorKind) ->
     {
         return (text.trim_end().len(), "expected \"{\".".to_string());
     }
-    (at, format!("SCSS 解析失败: {kind}"))
+    (at, format!("SCSS parse failure: {kind}"))
 }
 
 fn canonical(path: &Path) -> PathBuf {
@@ -489,7 +506,7 @@ fn display_paths(dir: &Path, paths: Vec<PathBuf>) -> Vec<PathBuf> {
         .collect()
 }
 
-/// `foo/bar.scss` → `foo/_bar.scss`（已经带 `_` 则不给候选）。
+/// `foo/bar.scss` -> `foo/_bar.scss` (no candidate when it already starts with `_`).
 fn partial_variant(path: &Path) -> Option<PathBuf> {
     let name = path.file_name()?.to_str()?;
     if name.starts_with('_') {
@@ -498,7 +515,8 @@ fn partial_variant(path: &Path) -> Option<PathBuf> {
     Some(path.parent()?.join(format!("_{name}")))
 }
 
-/// 语句里 `@name` 之后到语句尾的 prelude 区间（去掉首尾空白与结尾 `;`）。
+/// Prelude range of a statement from after `@name` to the end of the statement (leading
+/// and trailing whitespace and the trailing `;` removed).
 fn at_prelude_range(text: &str, start: usize, end: usize, name: &str) -> (usize, usize) {
     let raw = text.get(start..end).unwrap_or("");
     let after = raw
@@ -510,7 +528,7 @@ fn at_prelude_range(text: &str, start: usize, end: usize, name: &str) -> (usize,
     (after, after + trimmed.len())
 }
 
-/// 顶层逗号切分并返回各段的绝对区间。
+/// Split on top-level commas and return the absolute range of every segment.
 fn split_top_level_comma_ranges(text: &str, start: usize, end: usize) -> Vec<(usize, usize)> {
     crate::text::split_top_level(text.get(start..end).unwrap_or(""), b',')
         .into_iter()
@@ -518,7 +536,8 @@ fn split_top_level_comma_ranges(text: &str, start: usize, end: usize) -> Vec<(us
         .collect()
 }
 
-/// `@use` 的默认命名空间（文件名去前导 `_` 与扩展名；内置模块用规范名）。
+/// Default namespace for `@use` (file name without the leading `_` and without the
+/// extension; built-in modules use their canonical name).
 fn default_namespace(path: &str) -> String {
     if let Some(module) = crate::scss::modules::Builtin::from_url(path) {
         return module.default_namespace().to_string();
@@ -528,7 +547,7 @@ fn default_namespace(path: &str) -> String {
     name.split('.').next().unwrap_or(name).to_string()
 }
 
-/// 语句文本里的 at-rule 名（`@use ...` → `use`）。
+/// at-rule name inside the statement text (`@use ...` -> `use`).
 fn at_name(raw: &str) -> &str {
     let rest = raw.trim_start().trim_start_matches('@');
     let end = rest
@@ -599,16 +618,18 @@ fn value_unescape(text: &str) -> String {
     out
 }
 
-/// `@use` / `@forward` 的 prelude 解析结果。偏移都是合并文本里的绝对偏移。
+/// Parse result of a `@use` / `@forward` prelude. All offsets are absolute offsets in
+/// the merged text.
 pub(crate) struct ModuleSpec<'a> {
     pub(crate) path: String,
-    /// `as` 后面的原文（`*` / 命名空间 / 前缀 `p-*`）与起点。
+    /// Raw text after `as` (`*` / namespace / prefix `p-*`) and its start.
     pub(crate) alias: Option<(&'a str, usize)>,
     pub(crate) filter: Option<Filter<'a>>,
     pub(crate) config: Option<Config<'a>>,
 }
 
-/// `@forward ... show / hide` 的成员列表。变量以 `$` 开头，其余名字同时指函数与 mixin。
+/// Member list of `@forward ... show / hide`. Variables start with `$`; other names
+/// refer to both functions and mixins.
 #[derive(Default)]
 pub(crate) struct Filter<'a> {
     pub(crate) show: bool,
@@ -621,21 +642,21 @@ pub(crate) struct Config<'a> {
     pub(crate) at: usize,
 }
 
-/// 一条 `$name: value [!default]` 配置。
+/// One `$name: value [!default]` configuration.
 pub(crate) struct ConfigEntry<'a> {
     pub(crate) name: &'a str,
     pub(crate) value: &'a str,
-    /// `$name` 的起点（报错定位）。
+    /// Start of `$name` (error location).
     pub(crate) at: usize,
-    /// 值文本的起点（表达式求值时的合并偏移）。
+    /// Start of the value text (merged offset used when evaluating the expression).
     pub(crate) value_at: usize,
-    /// `@forward ... with` 里的 `!default`：调用方可以覆盖。
+    /// `!default` in `@forward ... with`: the caller may override it.
     pub(crate) default: bool,
-    /// `!default` 里 `!` 的位置（`@use` 不接受它）。
+    /// Position of the `!` in `!default` (`@use` does not accept it).
     pub(crate) default_at: usize,
 }
 
-/// `@use` / `@forward` 的 prelude（`text` 从 `@` 开始，`base` 是它的绝对偏移）。
+/// Prelude of `@use` / `@forward` (`text` starts at `@`; `base` is its absolute offset).
 pub(crate) fn parse_module_spec<'a>(
     text: &'a str,
     base: usize,
@@ -755,7 +776,7 @@ pub(crate) fn parse_module_spec<'a>(
     })
 }
 
-/// `with (...)` 里的配置项（按顶层逗号切分）。
+/// Configuration entries inside `with (...)` (split on top-level commas).
 pub(crate) fn config_entries<'a>(
     config: &Config<'a>,
 ) -> Result<Vec<ConfigEntry<'a>>, (usize, String)> {
@@ -809,8 +830,8 @@ pub(crate) fn config_entries<'a>(
     Ok(out)
 }
 
-/// `@use` / `@forward` 语句的结束位置（oxc 的 at-rule span 会截断 prelude，
-/// 这里从 span.end 往后扫到顶层 `;`）。
+/// End position of a `@use` / `@forward` statement (oxc's at-rule span truncates the
+/// prelude, so scan forward from span.end to the top-level `;`).
 pub(crate) fn statement_end(text: &str, from: usize) -> usize {
     let bytes = text.as_bytes();
     let mut depth = 0usize;
@@ -842,7 +863,8 @@ pub(crate) fn statement_end(text: &str, from: usize) -> usize {
     text.len()
 }
 
-/// 语句尾的下一个插入点（`@use` 的 span 可能不含结尾 `;`）。
+/// Next insertion point at the end of the statement (`@use`'s span may exclude the
+/// trailing `;`).
 fn after_semicolon(text: &str, at: usize) -> usize {
     let bytes = text.as_bytes();
     let mut i = at;
@@ -878,7 +900,7 @@ fn is_ident_char_utf8(ch: char) -> bool {
     ch.is_ascii_alphanumeric() || ch == '_' || ch == '-' || !ch.is_ascii()
 }
 
-/// 关键字（后面跟空白 / `(` / 结尾才算）。
+/// A keyword (only counted when followed by whitespace / `(` / the end).
 fn word_at(text: &str, i: usize, word: &str) -> bool {
     let Some(rest) = text.get(i..) else {
         return false;
@@ -892,18 +914,19 @@ fn word_at(text: &str, i: usize, word: &str) -> bool {
         .is_none_or(|c| c.is_whitespace() || c == '(')
 }
 
-/// 从 `open`（必须是 `(`）找到配对的 `)`。
+/// Find the matching `)` starting from `open` (which must be `(`).
 fn matching_paren(text: &str, open: usize) -> Option<usize> {
     crate::text::matching(text, open).map(|end| end - 1)
 }
 
-/// 把每个依赖片段插到对应 `@use` / `@forward` 语句之后（按文件内偏移拆段）。
+/// Insert every dependency segment after its `@use` / `@forward` statement (splitting
+/// at in-file offsets).
 fn splice_pieces(pieces: Vec<Part>, file: u32, mut splices: Vec<(usize, Vec<Part>)>) -> Vec<Part> {
     splices.sort_by_key(|(at, _)| *at);
     let mut out = Vec::with_capacity(pieces.len() + splices.len() * 2);
     let mut next = 0usize;
     for piece in pieces {
-        // 装载期每个片段都来自一个文件的一段连续原文。
+        // At load time every segment comes from one contiguous piece of a file's source.
         let Some(first) = piece.segs.first().copied() else {
             continue;
         };
@@ -938,7 +961,8 @@ fn splice_pieces(pieces: Vec<Part>, file: u32, mut splices: Vec<(usize, Vec<Part
     out
 }
 
-/// 收集所有层级的 `@import` 语句区间（含末尾 `;`）。
+/// Collect the ranges of all `@import` statements at every level (including the
+/// trailing `;`).
 fn collect_imports<'a>(stmts: &'a [Statement<'a>], out: &mut Vec<Span>) {
     for st in stmts {
         match st {
@@ -956,7 +980,8 @@ fn collect_imports<'a>(stmts: &'a [Statement<'a>], out: &mut Vec<Span>) {
     }
 }
 
-/// 顶层 `@use` / `@forward` 的区间；出现在其它语句之后即报错（返回该语句起点）。
+/// Ranges of top-level `@use` / `@forward`; an error if they appear after other
+/// statements (returns that statement's start).
 fn top_level_uses(stmts: &[Statement<'_>], text: &str) -> Result<Vec<Span>, usize> {
     let mut uses = Vec::new();
     let mut seen_other = false;
@@ -974,9 +999,10 @@ fn top_level_uses(stmts: &[Statement<'_>], text: &str) -> Result<Vec<Span>, usiz
                     end: statement_end(text, at.span.end),
                 });
             }
-            // `@charset` 不占位（前面的 `@use` 仍然合法）。
+            // `@charset` does not take a position (a preceding `@use` is still legal).
             Statement::AtRule(at) if at.name.name.eq_ignore_ascii_case("charset") => {}
-            // 变量声明与注释不占位（dart-sass 实测：`$x: 1; @use "m";` 合法）。
+            // Variable declarations and comments do not take a position (observed with
+            // dart-sass: `$x: 1; @use "m";` is legal).
             Statement::SassVariableDeclaration(_) => {}
             _ => seen_other = true,
         }

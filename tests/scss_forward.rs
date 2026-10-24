@@ -1,6 +1,7 @@
-//! `@forward` / `@use ... with` 的语义边界（dart-sass 1.93.2 实测）。
+//! Semantic boundaries of `@forward` / `@use ... with` (verified against dart-sass 1.93.2).
 //!
-//! 正向产物在 `tests/fixtures-scss-s32`；这里覆盖可见性、报错文案与位置。
+//! Positive output lives in `tests/fixtures-scss-s32`; here we cover visibility, error
+//! messages and positions.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -29,12 +30,17 @@ fn compile(path: &Path) -> Result<undercoat::Output, CompileError> {
 
 fn compile_err(path: &Path) -> CompileError {
     match compile(path) {
-        Ok(out) => panic!("{} 应当报错，实际产出:\n{}", path.display(), out.css),
+        Ok(out) => panic!(
+            "{} should have failed, but produced:\n{}",
+            path.display(),
+            out.css
+        ),
         Err(e) => e,
     }
 }
 
-/// `@forward` 的成员不在本模块作用域内可见（与 `@use` 的关键区别）。
+/// Members of a `@forward` are not visible inside the forwarding module's own scope
+/// (the key difference from `@use`).
 #[test]
 fn forwarded_members_are_not_visible_in_the_forwarding_module() {
     let path = project(&[
@@ -47,7 +53,8 @@ fn forwarded_members_are_not_visible_in_the_forwarding_module() {
     assert_eq!((err.line, err.column), (Some(2), Some(8)));
 }
 
-/// `@use ... as *` 也不让成员变成对外导出（S9 的隔离，回归）。
+/// `@use ... as *` does not turn members into exports either (the S9 isolation
+/// regression).
 #[test]
 fn star_import_does_not_leak_into_forwards() {
     let path = project(&[
@@ -58,7 +65,7 @@ fn star_import_does_not_leak_into_forwards() {
     assert_eq!(compile_err(&path).message, "Undefined variable.");
 }
 
-/// 配置非 `!default` 变量：dart 的文案与位置。
+/// Configuring a non-`!default` variable: dart's message and position.
 #[test]
 fn configuring_a_non_default_variable_is_an_error() {
     let path = project(&[
@@ -70,11 +77,11 @@ fn configuring_a_non_default_variable_is_an_error() {
         err.message,
         "This variable was not declared with !default in the @used module."
     );
-    // 指向 `$v` 的起点（`@use "lib" with (` 之后第 0 个字符）。
+    // Points at the start of `$v` (character 0 after `@use "lib" with (`).
     assert_eq!((err.line, err.column), (Some(1), Some(17)));
 }
 
-/// `with` 里的未知变量同样报「不是 !default」。
+/// An unknown variable in `with` reports "not !default" as well.
 #[test]
 fn configuring_an_unknown_variable_is_an_error() {
     let path = project(&[
@@ -87,7 +94,7 @@ fn configuring_an_unknown_variable_is_an_error() {
     );
 }
 
-/// 同一模块二次配置报错。
+/// Configuring the same module twice is an error.
 #[test]
 fn configuring_a_module_twice_is_an_error() {
     let path = project(&[
@@ -105,7 +112,7 @@ fn configuring_a_module_twice_is_an_error() {
     assert_eq!(err.line, Some(2));
 }
 
-/// 先普通 `@use` 再配置：同样报「已装载」。
+/// Plain `@use` followed by a configuration: also reports "already loaded".
 #[test]
 fn configuring_an_already_loaded_module_is_an_error() {
     let path = project(&[
@@ -118,7 +125,8 @@ fn configuring_an_already_loaded_module_is_an_error() {
     );
 }
 
-/// 两个不同的模块被转发到同一作用域且重名：dart 报在第二个 `@forward`。
+/// Two different modules forwarded into the same scope with a name clash: dart reports
+/// at the second `@forward`.
 #[test]
 fn two_forwards_defining_the_same_variable_conflict() {
     let path = project(&[
@@ -135,7 +143,8 @@ fn two_forwards_defining_the_same_variable_conflict() {
     assert_eq!(err.line, Some(2));
 }
 
-/// 同名函数/mixin 也冲突（dart 把两者并成一个命名空间，文案说 function）。
+/// Same-named functions/mixins conflict too (dart merges both into one namespace, so the
+/// message says function).
 #[test]
 fn two_forwards_defining_the_same_function_conflict() {
     let path = project(&[
@@ -150,7 +159,7 @@ fn two_forwards_defining_the_same_function_conflict() {
     );
 }
 
-/// 菱形转发（同一模块经两条路径到达）不算冲突。
+/// Diamond forwarding (the same module reached through two paths) is not a conflict.
 #[test]
 fn diamond_forwards_do_not_conflict() {
     let path = project(&[
@@ -164,7 +173,7 @@ fn diamond_forwards_do_not_conflict() {
     assert_eq!(out.css, ".z {\n  v: 1;\n}");
 }
 
-/// 模块自己的同名成员优先于转发来的（dart 不报冲突）。
+/// A module's own same-named members win over forwarded ones (dart reports no conflict).
 #[test]
 fn own_members_shadow_forwarded_ones_without_conflict() {
     let path = project(&[
@@ -176,7 +185,8 @@ fn own_members_shadow_forwarded_ones_without_conflict() {
     assert_eq!(out.css, ".z {\n  v: 9;\n}");
 }
 
-/// 私有成员（`-` / `_` 开头）不转发，也不允许从模块外访问。
+/// Private members (`-` / `_` prefix) are not forwarded and cannot be accessed from
+/// outside the module.
 #[test]
 fn private_members_are_not_forwarded() {
     let path = project(&[
@@ -191,7 +201,8 @@ fn private_members_are_not_forwarded() {
     );
 }
 
-/// `@import` 一个只写了 `@forward` 的文件：转发成员在导入处可见（dart 实测）。
+/// `@import` a file that only contains `@forward`: forwarded members are visible at the
+/// import site (verified against dart).
 #[test]
 fn import_of_a_forwarder_exposes_members_locally() {
     let path = project(&[
@@ -209,7 +220,7 @@ fn import_of_a_forwarder_exposes_members_locally() {
     assert_eq!(out.css, ".z {\n  v: 1;\n  m: 2;\n  f: 3;\n}");
 }
 
-/// `show` / `hide` 的名单写的是**加前缀之后**的名字（dart 实测）。
+/// `show` / `hide` lists name **prefixed** members (verified against dart).
 #[test]
 fn forward_filter_sees_prefixed_names() {
     let path = project(&[
@@ -219,7 +230,7 @@ fn forward_filter_sees_prefixed_names() {
     ]);
     assert_eq!(compile(&path).expect("compile").css, ".z {\n  v: 1;\n}");
 
-    // 写原名（未加前缀）则什么也匹配不到。
+    // Writing the original name (without the prefix) matches nothing.
     let path = project(&[
         ("_lib.scss", "$x: 1;\n"),
         ("_fwd.scss", "@forward 'lib' as p-* show $x;\n"),
@@ -228,7 +239,8 @@ fn forward_filter_sees_prefixed_names() {
     assert_eq!(compile_err(&path).message, "Undefined variable.");
 }
 
-/// 前缀只拼在转发名字上，私有成员照样不转发。
+/// The prefix is only prepended to forwarded names; private members are still not
+/// forwarded.
 #[test]
 fn prefix_does_not_revive_private_members() {
     let path = project(&[
@@ -239,7 +251,8 @@ fn prefix_does_not_revive_private_members() {
     assert_eq!(compile_err(&path).message, "Undefined variable.");
 }
 
-/// `@forward ... with (... !default)`：下游 `@use ... with` 可以覆盖转发默认值。
+/// `@forward ... with (... !default)`: a downstream `@use ... with` may override the
+/// forwarding default.
 #[test]
 fn forward_with_default_is_overridable() {
     let path = project(&[
@@ -257,7 +270,7 @@ fn forward_with_default_is_overridable() {
     assert_eq!(out.css, ".b {\n  c: purple;\n}\n\n.z {\n  c: purple;\n}");
 }
 
-/// 不带 `!default` 的转发配置不能被下游覆盖。
+/// A forwarding configuration without `!default` cannot be overridden downstream.
 #[test]
 fn forward_without_default_cannot_be_overridden() {
     let path = project(&[
@@ -271,7 +284,8 @@ fn forward_without_default_cannot_be_overridden() {
     );
 }
 
-/// 配置值可以是引用本文件变量的任意表达式，且只在模块加载时求值一次。
+/// Configuration values may be arbitrary expressions referring to variables of this
+/// file, and are evaluated exactly once, when the module loads.
 #[test]
 fn config_values_are_sass_expressions() {
     let path = project(&[
@@ -285,7 +299,8 @@ fn config_values_are_sass_expressions() {
     assert_eq!(out.css, ".l {\n  w: 3px;\n}\n\n.z {\n  w: 3px;\n}");
 }
 
-/// 配置值里的表达式即使被 `!default` 抵消也会求值（dart 实测：未定义变量照样报错）。
+/// Expressions in configuration values are evaluated even when `!default` cancels them
+/// (verified against dart: an undefined variable still errors).
 #[test]
 fn config_expressions_are_evaluated_eagerly() {
     let path = project(&[
@@ -295,8 +310,9 @@ fn config_expressions_are_evaluated_eagerly() {
     assert_eq!(compile_err(&path).message, "Undefined variable.");
 }
 
-/// 配置先下传给被转发的模块；目标不声明这个变量时，配置仍留给本模块后面的
-/// `!default` 声明（dart 实测：`x: 2`）。
+/// The configuration is first passed down to forwarded modules; when the target does not
+/// declare that variable, the configuration is still left for this module's later
+/// `!default` declaration (verified against dart: `x: 2`).
 #[test]
 fn config_falls_through_to_the_forwarding_modules_default() {
     let path = project(&[
@@ -314,7 +330,8 @@ fn config_falls_through_to_the_forwarding_modules_default() {
     );
 }
 
-/// 反过来：被转发的模块先消费了配置，本模块自己的同名 `!default` 就用默认值。
+/// The other way round: once the forwarded module has consumed the configuration, this
+/// module's own same-named `!default` uses the default value.
 #[test]
 fn config_consumed_by_the_forwarded_module_does_not_reach_the_forwarder() {
     let path = project(&[

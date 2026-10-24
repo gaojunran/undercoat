@@ -170,15 +170,15 @@ The shared layer is small and stable; almost all of the volume is the two dialec
 
 | Part | Lines |
 | --- | --- |
-| `src/lib.rs` (dispatch, `Options` / `Output`, `LineIndex`) | 104 |
-| `src/merge.rs` (merged text `Merged` + segment table `Seg`) | 331 |
-| `src/doc.rs` (IR, `Style`, printing) | 841 |
-| `src/print.rs` (append-only byte writer) | 253 |
-| `src/sourcemap.rs` (VLQ / `sourcesContent`) | 168 |
-| `src/less/*` (less front end) | 9981 |
-| `src/scss/*` (scss front end) | 18261 |
+| `src/lib.rs` (dispatch, `Options` / `Output`, `LineIndex`) | 116 |
+| `src/merge.rs` (merged text `Merged` + segment table `Seg`) | 344 |
+| `src/doc.rs` (IR, `Style`, printing) | 894 |
+| `src/print.rs` (append-only byte writer) | 266 |
+| `src/sourcemap.rs` (VLQ / `sourcesContent`) | 172 |
+| `src/less/*` (less front end) | 9984 |
+| `src/scss/*` (scss front end) | 18953 |
 
-Add `src/error.rs` (44 lines) and `src/text.rs` (176 lines) and `src/` totals 30159 lines (not
+Add `src/error.rs` (47 lines) and `src/text.rs` (182 lines) and `src/` totals 30958 lines (not
 counting the CLI under `src/bin`).
 
 Only four product symbols are public: `compile_file` / `Options` / `Output` / `CompileError`

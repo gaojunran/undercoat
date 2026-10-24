@@ -1,4 +1,4 @@
-// 循环变量的 semi-global 规则：根层循环体能改全局，规则里的循环只改局部。
+// semi-global rule for loop variables: a root-level loop body can change globals, a loop inside a rule only changes locals.
 $count: 0;
 @each $x in a b c {
   $count: $count + 1;
@@ -26,7 +26,7 @@ $w: 0;
   w: $w;
 }
 
-// 循环变量遮蔽同名全局变量，循环结束后原值不变。
+// the loop variable shadows a same-named global, and the original value is unchanged after the loop.
 $shadowed: keep;
 @each $shadowed in 1 2 {
   .shadow-#{$shadowed} {
@@ -37,7 +37,7 @@ $shadowed: keep;
   v: $shadowed;
 }
 
-// 规则体里的循环：赋值落在规则局部，不影响全局。
+// loops inside a rule body: assignments stay local to the rule and do not affect the global scope.
 $inner-count: 0;
 .scoped {
   @each $q in a b {

@@ -1,10 +1,13 @@
-//! 语义严格性：less@4.1.3 会报错的输入，我们也要报错，不能静默降级成错误产物。
+//! Semantic strictness: inputs that upset less@4.1.3 must upset us too; we must not
+//! silently degrade them into a wrong artifact.
 //!
-//! 每个 `tests/fixtures/strict/<case>.less` 配一个 `<case>.err`，内容是 less 4.1.3
-//! 对同一输入的报错文案（去掉 `NameError:` 之类的类型前缀）。
+//! Each `tests/fixtures/strict/<case>.less` comes with a `<case>.err` holding the error
+//! text less 4.1.3 produces for the same input (with type prefixes such as `NameError:`
+//! removed).
 //!
-//! 同时锁定「不该报错的必须保持安静」：guard 未命中、`isdefined()`、命名空间
-//! 内定义、`each`、detached ruleset 调用等既有正确场景。
+//! At the same time this pins down "what must not error stays quiet": an unmatched guard,
+//! `isdefined()`, definitions inside a namespace, `each`, detached ruleset calls and other
+//! already-correct scenarios.
 
 use std::path::Path;
 
@@ -25,74 +28,80 @@ fn less_errors_are_errors() {
         }
         let expected_path = path.with_extension("err");
         let expected = std::fs::read_to_string(&expected_path)
-            .unwrap_or_else(|e| panic!("缺少期望报错 {}: {e}", expected_path.display()));
+            .unwrap_or_else(|e| panic!("missing expected error {}: {e}", expected_path.display()));
         let source = std::fs::read_to_string(&path).expect("read less");
         let err = match compile_file(&path, &source, &Options::default()) {
-            Ok(out) => panic!("{} 应当报错，实际输出:\n{}", path.display(), out.css),
+            Ok(out) => panic!(
+                "{} should have failed, but produced:\n{}",
+                path.display(),
+                out.css
+            ),
             Err(e) => format!("{e:#}"),
         };
         assert_eq!(
             err.trim(),
             expected.trim(),
-            "报错文案与 less@4.1.3 不一致: {}",
+            "error message does not match less@4.1.3: {}",
             path.display()
         );
         checked += 1;
     }
-    assert!(checked >= 8, "strict 用例数量异常: {checked}");
+    assert!(checked >= 8, "unexpected number of strict cases: {checked}");
 }
 
 #[test]
 fn legit_lookups_stay_silent() {
-    // less 在这些输入上都不报错；改动前它们就正确，不能被「严格化」误伤。
+    // less reports no error on any of these inputs; they were already correct before the
+    // change and must not be broken by "strictness".
     let cases = [
-        // guard 未命中的 mixin 调用：静默
+        // mixin call whose guard does not match: silent
         (".m(@a) when (@a > 5) { x: @a; }\n.n { .m(1); }\n", ""),
-        // 命名空间内定义 + 命名空间调用
+        // definition inside a namespace + namespaced call
         (
             "#ns { .m() { x: 1; } }\n.a { #ns > .m(); }\n",
             ".a {\n  x: 1;\n}\n",
         ),
-        // `isdefined()` 探测未定义变量
+        // `isdefined()` probing an undefined variable
         (".a { v: isdefined(@nope); }\n", ".a {\n  v: false;\n}\n"),
-        // detached ruleset 调用
+        // detached ruleset call
         ("@dr: { a: 1; };\n.n { @dr(); }\n", ".n {\n  a: 1;\n}\n"),
-        // `each` 语句级展开
+        // statement-level expansion of `each`
         (
             "each(1 2, { .x@{value} { y: @value; } });\n",
             ".x1 {\n  y: 1;\n}\n.x2 {\n  y: 2;\n}\n",
         ),
-        // 惰性求值：后声明的变量在规则体里可见
+        // lazy evaluation: variables declared later are visible in a rule body
         (".a { v: @later; }\n@later: 1;\n", ".a {\n  v: 1;\n}\n"),
-        // `@@name` 间接引用
+        // `@@name` indirect reference
         (
             "@name: 'x';\n@x: 1;\n.a { v: @@name; }\n",
             ".a {\n  v: 1;\n}\n",
         ),
-        // `@arguments` / `@rest...` 是 mixin 的隐式变量
+        // `@arguments` / `@rest...` are mixin implicit variables
         (
             ".m(@a; @rest...) { v: @arguments; w: @rest; }\n.x { .m(1, 2, 3); }\n",
             ".x {\n  v: 1 2 3;\n  w: 2 3;\n}\n",
         ),
-        // `each` 的 `@value` / `@key` / `@index`
+        // `@value` / `@key` / `@index` of `each`
         (
             "@l: a b;\n.x { each(@l, { k@{index}: @value; }); }\n",
             ".x {\n  k1: a;\n  k2: b;\n}\n",
         ),
-        // `isdefined()` 探测查找式（less 的 evalArgs=false）
+        // `isdefined()` probing a lookup expression (less's evalArgs=false)
         (
             "@dr: { x: 1; };\n.a { v: isdefined(@dr[x]); w: isdefined(@nope[x]); }\n",
             ".a {\n  v: true;\n  w: false;\n}\n",
         ),
-        // guard 未命中的体不求值，体内的未定义引用不报错
+        // a body whose guard does not match is not evaluated, so undefined references
+        // inside it do not error
         (".m(@a) when (@a > 5) { v: @nope; }\n.a { .m(1); }\n", ""),
-        // 未调用的 detached ruleset 体内的引用不报错
+        // references inside an uncalled detached ruleset do not error
         ("@dr: { a: @nope; };\n.n { x: 1; }\n", ".n {\n  x: 1;\n}\n"),
     ];
     let path = strict_dir().join("inline.less");
     for (source, expected) in cases {
         let out = compile_file(&path, source, &Options::default())
-            .unwrap_or_else(|e| panic!("{source} 不应报错: {e:#}"));
-        assert_eq!(out.css, expected, "产物不一致: {source}");
+            .unwrap_or_else(|e| panic!("{source} should not fail: {e:#}"));
+        assert_eq!(out.css, expected, "output differs: {source}");
     }
 }

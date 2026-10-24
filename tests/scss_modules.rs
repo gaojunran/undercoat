@@ -1,6 +1,7 @@
-//! `@use ... as *` 的作用域边界：成员只属于**本模块**（可无限定名使用、可被本模块
-//! `@forward` 显式转发），但**不进入**本模块的对外成员表——下游 `@use this as *`
-//! 与 `this.$x` 都读不到。dart-sass 1.93.2 实测语义。
+//! Scope boundaries of `@use ... as *`: members belong to **this module only** (usable
+//! unqualified and explicitly forwardable via this module's `@forward`), but they do
+//! **not** enter this module's export table — a downstream `@use this as *` and
+//! `this.$x` cannot read them. Semantics verified against dart-sass 1.93.2.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -9,7 +10,7 @@ use undercoat::{CompileError, Options, compile_file};
 
 static COUNTER: AtomicU32 = AtomicU32::new(0);
 
-/// 在临时目录里铺一组文件，返回 `main.scss` 的路径。
+/// Lay out a set of files in a temp directory and return the path of `main.scss`.
 fn project(files: &[(&str, &str)]) -> PathBuf {
     let dir = std::env::temp_dir().join(format!(
         "minibuild-scss-modules-{}-{}",
@@ -30,7 +31,11 @@ fn compile(path: &Path) -> Result<undercoat::Output, CompileError> {
 
 fn compile_err(path: &Path) -> CompileError {
     match compile(path) {
-        Ok(out) => panic!("{} 应当报错，实际产出:\n{}", path.display(), out.css),
+        Ok(out) => panic!(
+            "{} should have failed, but produced:\n{}",
+            path.display(),
+            out.css
+        ),
         Err(e) => e,
     }
 }
@@ -46,7 +51,7 @@ fn star_module_variable_is_not_exported() {
     assert_eq!(err.message, "Undefined variable.");
     assert_eq!((err.line, err.column), (Some(2), Some(8)));
 
-    // 命名空间读同样读不到。
+    // The namespaced read cannot see it either.
     let path = project(&[
         ("_two.scss", "$v: two;\n"),
         ("_relay.scss", "@use 'two' as *;\n"),
@@ -67,7 +72,8 @@ fn star_module_mixin_and_function_are_not_exported() {
     ]);
     assert_eq!(compile_err(&path).message, "Undefined mixin.");
 
-    // 函数名不被认识时按 CSS 函数透传（dart 同样输出 `f: ff()`）。
+    // An unrecognized function name is passed through as a CSS function (dart emits
+    // `f: ff()` as well).
     let path = project(&[
         (
             "_m.scss",
@@ -109,7 +115,7 @@ fn star_members_stay_usable_inside_the_module() {
 
 #[test]
 fn meta_existence_sees_star_members_only_in_scope() {
-    // 模块内：`as *` 的成员算「存在」（dart 实测为 true）。
+    // Inside the module: members of `as *` count as existing (dart reports true).
     let path = project(&[
         (
             "_m.scss",
@@ -128,7 +134,7 @@ fn meta_existence_sees_star_members_only_in_scope() {
         out.css
     );
 
-    // 下游：同名成员不存在（dart 实测为 false）。
+    // Downstream: same-named members do not exist (dart reports false).
     let path = project(&[
         (
             "_m.scss",
@@ -152,7 +158,8 @@ fn meta_existence_sees_star_members_only_in_scope() {
 
 #[test]
 fn forward_still_exports_members() {
-    // `@forward` 才是导出：`relay` 显式转发后，下游能无限定名读到。
+    // `@forward` is what exports: after `relay` forwards explicitly, downstream can read
+    // it unqualified.
     let path = project(&[
         (
             "_one.scss",
@@ -170,7 +177,7 @@ fn forward_still_exports_members() {
 
 #[test]
 fn forward_and_star_coexist_in_one_module() {
-    // `@forward 'one'` 导出 one，`@use 'two' as *` 只在 relay 内部可见。
+    // `@forward 'one'` exports one, while `@use 'two' as *` is only visible inside relay.
     let path = project(&[
         ("_one.scss", "$v: one;\n"),
         ("_two.scss", "$v: two;\n$w: only-in-relay;\n"),
@@ -197,8 +204,9 @@ fn forward_and_star_coexist_in_one_module() {
 
 #[test]
 fn star_members_do_not_shadow_forwarded_exports() {
-    // 下游同时 `@use 'one' as *` 与 `@use 'relay' as *`（relay 只泄漏 one 的值时才是
-    // `two`）；修好后 relay 不导出任何东西，第一段 `one` 胜出。
+    // Downstream uses both `@use 'one' as *` and `@use 'relay' as *` (only `two` if
+    // relay leaked one's value); once fixed, relay exports nothing and the first `one`
+    // wins.
     let path = project(&[
         ("_one.scss", "$v: one;\n"),
         ("_two.scss", "$v: two;\n"),

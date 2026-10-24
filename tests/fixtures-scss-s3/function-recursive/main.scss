@@ -1,4 +1,4 @@
-// 递归：阶乘、斐波那契、相互引用（后定义的函数在调用时解析）。
+// recursion: factorial, Fibonacci, mutual references (functions defined later resolve at call time).
 @function fact($n) {
   @if $n <= 1 {
     @return 1;

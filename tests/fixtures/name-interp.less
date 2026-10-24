@@ -1,4 +1,4 @@
-// 定义侧名字插值、选择器插值、转义标识符匹配、参数驱动选择器
+// definition-side name interpolation, selector interpolation, escaped identifier matching, argument-driven selectors
 @name: foo;
 @num: 3;
 
@@ -17,7 +17,7 @@
   #foo();
 }
 
-// CSS 转义标识符按原文匹配
+// CSS escaped identifiers match literally
 .\123 {
   b: 4;
 }
@@ -38,7 +38,7 @@
   .person.sayGender();
 }
 
-// 循环里用插值产出选择器
+// selectors are produced with interpolation inside a loop
 .gen(@i) when (@i > 0) {
   .w@{i} {
     width: @i * 5px;

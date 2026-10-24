@@ -1,4 +1,4 @@
-// @for：through 含上界、to 不含、下界大于上界时倒着走、空循环、负数边界。
+// @for: `through` includes the upper bound, `to` excludes it, counting down when the lower bound is greater, empty loops, negative bounds.
 @for $i from 1 through 3 {
   .through-#{$i} {
     n: $i;
@@ -29,7 +29,7 @@
   }
 }
 
-// 循环体里可以用 @if / @return 之外的任意语句。
+// statements other than @if / @return may appear in the loop body.
 $total: 0;
 @for $i from 1 through 4 {
   $total: $total + $i * 10;

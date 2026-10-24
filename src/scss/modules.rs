@@ -1,12 +1,15 @@
-//! 内置模块（`sass:math` / `sass:map` / …）。
+//! Built-in modules (`sass:math` / `sass:map` / …).
 //!
-//! 内置模块**不参与文件解析**：`@use "sass:math"` 直接得到一个静态成员表，命名空间
-//! 解析不到用户文件。成员表以 vendor 的 dart-sass 1.35.2 实测为准（`meta.module-functions()`），
-//! 不照最新文档写：`color.channel`、`meta.calc-args`、`list.slice` 在 1.35.2 都不存在。
+//! Built-in modules **do not take part in file resolution**: `@use "sass:math"`
+//! directly yields a static member table, and the namespace never resolves to a user
+//! file. The member table follows the vendored dart-sass 1.35.2 as observed
+//! (`meta.module-functions()`), not the latest docs: `color.channel`,
+//! `meta.calc-args` and `list.slice` do not exist in 1.35.2.
 //!
-//! 1.35.2 有个历史包袱：`meta.module-functions("sass:color")` 会列出 9 个**实际不可调用**
-//! 的废弃函数（`lighten`/`darken`/…），调用时报 `The function X() isn't in the sass:color
-//! module.`。这里把「列出」与「可调用」分成两张表，连这个 bug 一起对齐。
+//! 1.35.2 carries a historical wart: `meta.module-functions("sass:color")` lists 9
+//! deprecated functions that are **not actually callable** (`lighten`/`darken`/…), and
+//! calling them reports `The function X() isn't in the sass:color module.`. Here
+//! "listed" and "callable" are two separate tables, so this bug is matched as well.
 
 use super::builtins::{self, Args};
 use super::color_space::{self, Space};
@@ -24,7 +27,8 @@ pub(crate) enum Builtin {
     Selector,
 }
 
-/// `meta.module-functions()` 列出的成员（含 1.35.2 里不可调用的废弃颜色函数）。
+/// Members listed by `meta.module-functions()` (including the deprecated color
+/// functions that are not callable in 1.35.2).
 const MATH_FUNCTIONS: &[&str] = &[
     "abs",
     "acos",
@@ -108,8 +112,9 @@ const LIST_FUNCTIONS: &[&str] = &[
     "slash",
 ];
 
-/// 模块表里列出的 28 个，其中最后 9 个在 1.35.2 里其实不可调用。
-/// 1.93.2 才有的成员（1.35.2 里连名字都不存在）。
+/// The 28 listed in the module table, the last 9 of which are actually not callable in
+/// 1.35.2.
+/// Members that only exist in 1.93.2 (their names do not even exist in 1.35.2).
 const COLOR_MODERN: &[&str] = &[
     "space",
     "to-space",
@@ -173,9 +178,10 @@ const SELECTOR_FUNCTIONS: &[&str] = &[
     "unify",
 ];
 
-/// 模块里可调用的成员。1.35.2 只真正导出前 19 个（`lighten` 等 9 个在表里但调用即报错）；
-/// 1.93.2 保留了同一处怪癖（`meta.module-functions("color")` 列出它们，调用仍报
-/// `The function lighten() isn't in the sass:color module.`），所以这里照旧。
+/// The members callable in the module. 1.35.2 really exports only the first 19 (the 9
+/// such as `lighten` are listed, but calling them errors); 1.93.2 keeps the same quirk
+/// (`meta.module-functions("color")` lists them and calling them still reports
+/// `The function lighten() isn't in the sass:color module.`), so this stays as is.
 const COLOR_CALLABLE: &[&str] = &[
     "red",
     "green",
@@ -208,8 +214,8 @@ const COLOR_CALLABLE: &[&str] = &[
 ];
 
 impl Builtin {
-    /// `@use "sass:xxx"` 的 URL → 模块。不认识的内置 URL 返回 `None`（调用方按
-    /// 「找不到样式表」报错）。
+    /// URL of `@use "sass:xxx"` -> module. An unknown built-in URL returns `None` (the
+    /// caller reports "can't find stylesheet").
     pub(crate) fn from_url(url: &str) -> Option<Self> {
         Some(match url {
             "sass:math" => Self::Math,
@@ -235,7 +241,7 @@ impl Builtin {
         }
     }
 
-    /// `meta.module-functions()` 的键集合（含不可调用的历史遗留项）。
+    /// Key set of `meta.module-functions()` (including the non-callable legacy items).
     pub(crate) fn listed_functions(self) -> &'static [&'static str] {
         match self {
             Self::Math => MATH_FUNCTIONS,
@@ -248,7 +254,8 @@ impl Builtin {
         }
     }
 
-    /// 名字是否出现在模块的**成员表**里（`as *` 遮蔽全局函数时按这张表算）。
+    /// Whether the name appears in the module's **member table** (this table is used
+    /// when `as *` shadows a global function).
     pub(crate) fn has_member(self, name: &str) -> bool {
         self.listed_functions()
             .iter()
@@ -263,7 +270,8 @@ impl Builtin {
         table.iter().any(|member| value::names_eq(member, name))
     }
 
-    /// 模块变量。`$e` / `$pi` 是 1.35.2 就有的，其余五个常量是 1.93.2 新增。
+    /// Module variables. `$e` / `$pi` exist since 1.35.2; the other five constants were
+    /// added in 1.93.2.
     pub(crate) fn variable(self, name: &str) -> Option<Value> {
         self.variables()
             .into_iter()
@@ -287,7 +295,7 @@ impl Builtin {
     }
 }
 
-/// 「函数不在模块里」的报错（1.35.2 文案）。
+/// The "function is not in the module" error (1.35.2 wording).
 pub(crate) fn not_in_module(module: Builtin, name: &str) -> String {
     format!(
         "The function {}() isn't in the sass:{} module.",
@@ -296,7 +304,8 @@ pub(crate) fn not_in_module(module: Builtin, name: &str) -> String {
     )
 }
 
-/// 模块函数分派。`Meta` 需要求值器上下文，由 `eval` 直接处理。
+/// Module function dispatch. `Meta` needs the evaluator context and is handled directly
+/// by `eval`.
 pub(crate) fn call(
     module: Builtin,
     name: &str,
@@ -313,8 +322,11 @@ pub(crate) fn call(
         Builtin::List => list(name, positional, keywords),
         Builtin::Color => color(name, positional, keywords),
         Builtin::Selector => selector(name, positional, keywords),
-        // `meta` 里不依赖求值器的三个（`inspect` / `type-of` / `keywords`）直接复用全局实现。
-        Builtin::Meta => Ok(builtins::call(name, positional, keywords)?.expect("全局表里有")),
+        // The three `meta` functions that don't need the evaluator (`inspect` /
+        // `type-of` / `keywords`) reuse the global implementations directly.
+        Builtin::Meta => {
+            Ok(builtins::call(name, positional, keywords)?.expect("present in the global table"))
+        }
     }
 }
 
@@ -336,15 +348,20 @@ fn math(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> ValRe
             }
             Ok(Value::Number(Number::with_unit(number.value * 100.0, "%")))
         }
-        // 与全局同名函数完全同语义的成员直接复用全局实现。
+        // Members with exactly the same semantics as a global function of the same name
+        // reuse the global implementation directly.
         "round" | "ceil" | "floor" | "abs" | "max" | "min" => {
-            Ok(builtins::call(name, positional, keywords)?.expect("全局表里有"))
+            Ok(builtins::call(name, positional, keywords)?.expect("present in the global table"))
         }
-        "unit" => Ok(builtins::call("unit", positional, keywords)?.expect("全局表里有")),
-        "is-unitless" => Ok(builtins::call("unitless", positional, keywords)?.expect("全局表里有")),
-        "compatible" => {
-            Ok(builtins::call("comparable", positional, keywords)?.expect("全局表里有"))
+        "unit" => {
+            Ok(builtins::call("unit", positional, keywords)?.expect("present in the global table"))
         }
+        "is-unitless" => {
+            Ok(builtins::call("unitless", positional, keywords)?
+                .expect("present in the global table"))
+        }
+        "compatible" => Ok(builtins::call("comparable", positional, keywords)?
+            .expect("present in the global table")),
         "pow" => pow(positional, keywords),
         "sqrt" => unary_unitless("sqrt", positional, keywords, f64::sqrt),
         "log" => log(positional, keywords),
@@ -368,7 +385,7 @@ fn deg(value: f64) -> Value {
     Value::Number(Number::with_unit(value, "deg"))
 }
 
-/// dart 的 `assertNoUnits` 文案。
+/// dart's `assertNoUnits` wording.
 fn no_units(number: &Number, param: &str) -> ValResult<f64> {
     if !number.is_unitless() {
         return Err(format!(
@@ -383,8 +400,9 @@ fn unitless_value(number: &Number, param: &str) -> ValResult<f64> {
     no_units(number, param)
 }
 
-/// `/` 的模块版：两个数字真除法；有一个不是数字时退化成斜杠 list（1.35.2 行为，
-/// 会带一条废弃警告；这里不产生警告，产物一致）。
+/// The module version of `/`: a real division when both sides are numbers; when one
+/// side is not a number it degrades to a slash list (the 1.35.2 behavior, which also
+/// emits a deprecation warning; no warning is emitted here, the output is the same).
 fn div(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
     let args = Args::new(&["number1", "number2"], positional, keywords)?;
     let left = args.req(0)?;
@@ -431,7 +449,7 @@ fn log(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
     })))
 }
 
-/// `hypot($numbers...)`：单位换算到第一个实参的单位。
+/// `hypot($numbers...)`: units are converted to the unit of the first argument.
 fn hypot(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
     if let Some((name, _)) = keywords.first() {
         return Err(format!("No argument named ${name}."));
@@ -466,7 +484,8 @@ fn clamp(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value>
     let min = args.number(0)?;
     let number = args.number(1)?;
     let max = args.number(2)?;
-    // dart：先校验 $max 与 $min 可比（报错文案带 `$max: ` 前缀）。
+    // dart: first check that $max and $min are comparable (the message is prefixed with
+    // `$max: `).
     max.compare(min)
         .map_err(|message| format!("$max: {message}"))?;
     if number
@@ -501,7 +520,8 @@ fn random(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value
     )))
 }
 
-/// 不需要密码学强度：`math.random()` 的产物本来就不确定，测试只看范围。
+/// No cryptographic strength needed: the output of `math.random()` is nondeterministic
+/// anyway, and tests only check the range.
 fn next_random() -> f64 {
     use std::cell::Cell;
     thread_local! {
@@ -523,7 +543,8 @@ fn next_random() -> f64 {
     })
 }
 
-/// 三角函数的角参数：无单位当弧度，角度单位换算成弧度。
+/// Angle argument of trigonometric functions: unitless counts as radians, angle units
+/// are converted to radians.
 fn radians(number: &Number, param: &str) -> ValResult<f64> {
     match number.unit() {
         "" => Ok(number.value),
@@ -580,12 +601,12 @@ fn atan2(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value>
 // sass:map
 // ---------------------------------------------------------------------------
 
-/// `(map 的 entries, 其余键)`。
+/// `(entries of the map, remaining keys)`.
 type MapAndKeys = (Vec<(Value, Value)>, Vec<Value>);
 
 fn map(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
-    // 模块签名都是 `($map, $keys...)` 形态：关键字实参只可能来自拼错的调用，
-    // 直接按 dart 的「未知参数」报错。
+    // Module signatures are all `($map, $keys...)` shaped: keyword arguments can only
+    // come from a mistyped call, so report dart's "unknown argument" error directly.
     match name {
         "get" => {
             let (map, keys) = map_and_keys(positional, "$key")?;
@@ -603,7 +624,7 @@ fn map(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> ValRes
             if positional.len() < 3 {
                 return Err("Expected $args to contain a value.".to_string());
             }
-            let (value, keys) = positional[1..].split_last().expect("长度至少 2");
+            let (value, keys) = positional[1..].split_last().expect("at least 2 elements");
             Ok(set_path(&map, keys, value.clone()))
         }
         "merge" => merge(positional, keywords),
@@ -648,8 +669,9 @@ fn map(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> ValRes
     }
 }
 
-/// `map.merge($map1, $args...)`：最后一个实参是要并入的 map，前面的是嵌套路径
-/// （`merge($m, a, $other)` = 把 `$other` 并到 `$m` 的 `a` 下）。
+/// `map.merge($map1, $args...)`: the last argument is the map to merge in, the ones
+/// before it are the nesting path (`merge($m, a, $other)` = merge `$other` under `a` of
+/// `$m`).
 fn merge(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
     let Some(first) = positional.first() else {
         return Err("Missing argument $map1.".to_string());
@@ -664,7 +686,7 @@ fn merge(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value>
             entries: merge_entries(entries, second),
         }));
     }
-    let (second, keys) = positional[1..].split_last().expect("长度至少 2");
+    let (second, keys) = positional[1..].split_last().expect("at least 2 elements");
     let second = value::as_map(second, "map2")?;
     let _ = keywords;
     Ok(set_path(
@@ -674,7 +696,7 @@ fn merge(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value>
     ))
 }
 
-/// 取出 `$map` 与其余位置实参（`$keys...`）。
+/// Take `$map` and the remaining positional arguments (`$keys...`).
 fn map_and_keys(positional: &[Value], key_message: &str) -> ValResult<MapAndKeys> {
     let Some(first) = positional.first() else {
         return Err("Missing argument $map.".to_string());
@@ -728,7 +750,8 @@ fn deep_merge(first: Vec<(Value, Value)>, second: Vec<(Value, Value)>) -> Vec<(V
     for (key, value) in first {
         match out.iter().position(|(k, _)| value::values_equal(k, &key)) {
             Some(i) => {
-                // 两边都是 map 时递归合并（顺序沿用第二张的内层顺序）。
+                // Recursively merge when both sides are maps (the inner order of the second
+                // map is kept).
                 if let (Value::Map(a), Value::Map(b)) = (&value, &out[i].1) {
                     out[i].1 = Value::Map(Map {
                         entries: deep_merge(a.entries.clone(), b.entries.clone()),
@@ -758,7 +781,8 @@ fn set_path(map: &[(Value, Value)], keys: &[Value], value: Value) -> Value {
         _ if rest.is_empty() => Vec::new(),
         other => {
             if !rest.is_empty() {
-                // 中间值是标量：dart 把这一层当空 map 继续写。
+                // The intermediate value is a scalar: dart treats this level as an empty map
+                // and keeps writing.
                 let _ = other;
                 Vec::new()
             } else {
@@ -788,7 +812,8 @@ fn deep_remove(map: &[(Value, Value)], keys: &[Value]) -> Value {
         .iter()
         .position(|(k, _)| value::values_equal(k, key))
     else {
-        // 路径不存在：整张 map 原样返回（dart 不会凭空造出空 map）。
+        // The path does not exist: return the whole map as is (dart never conjures up an
+        // empty map).
         return Value::Map(Map { entries });
     };
     if rest.is_empty() {
@@ -796,7 +821,7 @@ fn deep_remove(map: &[(Value, Value)], keys: &[Value]) -> Value {
         return Value::Map(Map { entries });
     }
     let Value::Map(nested) = &entries[i].1 else {
-        // 中间值不是 map：dart 保持原样。
+        // The intermediate value is not a map: dart keeps it as is.
         return Value::Map(Map { entries });
     };
     entries[i].1 = deep_remove(&nested.entries.clone(), rest);
@@ -829,14 +854,17 @@ fn string(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> Val
                 args.req(0)?.inspect()
             ));
         }
-        return Ok(builtins::call(global, positional, keywords)?.expect("全局表里有"));
+        return Ok(
+            builtins::call(global, positional, keywords)?.expect("present in the global table")
+        );
     }
     if global == "str-slice" {
-        // dart 的 `str-slice` / `string.slice` 对非整数索引报裸 `1.2 is not an int.`
+        // dart's `str-slice` / `string.slice` report a bare `1.2 is not an int.` for
+        // non-integer indexes.
         let args = Args::new(&["string", "start-at", "end-at"], positional, keywords)?;
         return slice(&args);
     }
-    Ok(builtins::call(global, positional, keywords)?.expect("全局表里有"))
+    Ok(builtins::call(global, positional, keywords)?.expect("present in the global table"))
 }
 
 fn int_arg(number: &Number) -> ValResult<i64> {
@@ -846,7 +874,8 @@ fn int_arg(number: &Number) -> ValResult<i64> {
     Ok(number.value.round() as i64)
 }
 
-/// `string.slice`：负索引从尾部数；越界自动截到边界。
+/// `string.slice`: negative indexes count from the end; out-of-range indexes are
+/// clamped to the bounds.
 fn slice(args: &Args) -> ValResult<Value> {
     let source = args.string_owned(0)?;
     let chars = source.text.chars().collect::<Vec<_>>();
@@ -874,7 +903,8 @@ fn slice(args: &Args) -> ValResult<Value> {
     }))
 }
 
-/// `unique-id()`：dart 返回 7 位小写字母 + 数字的随机串，只保证进程内唯一。
+/// `unique-id()`: dart returns a random 7-character lowercase alphanumeric string and
+/// only guarantees uniqueness within the process.
 pub(crate) fn unique_id() -> String {
     use std::cell::Cell;
     thread_local! {
@@ -885,7 +915,7 @@ pub(crate) fn unique_id() -> String {
         c.set(n);
         n
     });
-    // 以随机值为前缀，避免多次编译重复。
+    // Use a random value as the prefix so repeated compilations do not collide.
     let mut value = (next_random() * 1e15) as u64 ^ n.wrapping_mul(0x9e37_79b9);
     let mut out = String::with_capacity(7);
     out.push('u');
@@ -900,7 +930,7 @@ pub(crate) fn unique_id() -> String {
     out
 }
 
-/// `string.split($string, $separator, $limit: null)`（1.93.2）：括号化的逗号 list。
+/// `string.split($string, $separator, $limit: null)` (1.93.2): a bracketed comma list.
 fn split(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
     let args = Args::new(&["string", "separator", "limit"], positional, keywords)?;
     let text = match args.req(0)? {
@@ -928,7 +958,8 @@ fn split(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value>
     } else {
         let mut parts = Vec::new();
         let mut rest = text.as_str();
-        // `$limit` 是**切分次数**上限（dart 1.93.2 实测：limit 2 → 3 段）。
+        // `$limit` is an upper bound on the **number of splits** (observed with dart
+        // 1.93.2: limit 2 -> 3 parts).
         let mut splits = 0;
         loop {
             if let Some(limit) = limit {
@@ -968,11 +999,10 @@ fn split(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value>
 fn list(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
     match name {
         "length" | "nth" | "set-nth" | "join" | "append" | "zip" | "index" => {
-            Ok(builtins::call(name, positional, keywords)?.expect("全局表里有"))
+            Ok(builtins::call(name, positional, keywords)?.expect("present in the global table"))
         }
-        "separator" => {
-            Ok(builtins::call("list-separator", positional, keywords)?.expect("全局表里有"))
-        }
+        "separator" => Ok(builtins::call("list-separator", positional, keywords)?
+            .expect("present in the global table")),
         "is-bracketed" => {
             let args = Args::new(&["list"], positional, keywords)?;
             Ok(Value::Bool(matches!(
@@ -1011,10 +1041,10 @@ fn color(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> ValR
         "whiteness" | "blackness" => return hwb_component(name, positional, keywords),
         other => other,
     };
-    Ok(builtins::call(global, positional, keywords)?.expect("全局表里有"))
+    Ok(builtins::call(global, positional, keywords)?.expect("present in the global table"))
 }
 
-/// `hwb($hue, $whiteness, $blackness, $alpha: 1)` → 颜色。
+/// `hwb($hue, $whiteness, $blackness, $alpha: 1)` -> color.
 fn hwb(positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
     let args = Args::new(
         &["hue", "whiteness", "blackness", "alpha"],
@@ -1063,7 +1093,7 @@ fn hwb_component(
     Ok(Value::Number(Number::with_unit(value, "%")))
 }
 
-/// HSL → RGB（h 度数，s/l 0..1）。
+/// HSL -> RGB (h in degrees, s/l in 0..1).
 fn hue_to_rgb(hue: f64, saturation: f64, lightness: f64) -> (f64, f64, f64) {
     let hue = hue.rem_euclid(360.0) / 360.0;
     if saturation == 0.0 {
@@ -1099,9 +1129,9 @@ fn hue_to_rgb(hue: f64, saturation: f64, lightness: f64) -> (f64, f64, f64) {
     )
 }
 
-// ---- 1.93.2 新增的现代颜色 API ---------------------------------------------
+// ---- modern color API added in 1.93.2 --------------------------------------
 
-/// 空间实参：不带引号的标识符（`rgb` / `hsl` / `oklch` …）。
+/// Space argument: an unquoted identifier (`rgb` / `hsl` / `oklch` …).
 fn space_arg(value: &Value, param: &str) -> ValResult<Space> {
     let text = match value {
         Value::Str(text) => text.text.clone(),
@@ -1124,11 +1154,13 @@ fn color_of(value: &Value) -> ValResult<&Color> {
     }
 }
 
-/// 通道序号：`alpha` 单独占一位（3），未知名字按 dart 文案报错。
+/// Channel index: `alpha` occupies its own slot (3), and an unknown name reports
+/// dart's message.
 ///
-/// dart 在 `color.channel` 与 `is-missing`/`is-powerless` 里用了两套文案：
-/// 前者是 `Color #036 has no channel named nope.`（无引号），后者是
-/// `Color #123456 doesn't have a channel named "hue".`（带引号）。
+/// dart uses two different messages in `color.channel` and in
+/// `is-missing`/`is-powerless`: the former is `Color #036 has no channel named nope.`
+/// (no quotes), the latter is `Color #123456 doesn't have a channel named "hue".`
+/// (with quotes).
 fn channel_slot(color: &Color, space: Space, name: &str, verbatim: bool) -> ValResult<usize> {
     if name == "alpha" {
         return Ok(3);
@@ -1297,7 +1329,8 @@ fn modern(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> Val
     }
 }
 
-/// 显示单位 → `color_space` 的数学单位（`rgb` 0..255、`oklab` lightness 0..100）。
+/// Display units -> the math units of `color_space` (`rgb` 0..255, `oklab` lightness
+/// 0..100).
 fn math_channel(space: Space, ch: [f64; 3]) -> [f64; 3] {
     match space {
         Space::Rgb => ch.map(|c| c / 255.0),
@@ -1308,7 +1341,8 @@ fn math_channel(space: Space, ch: [f64; 3]) -> [f64; 3] {
 
 fn same(first: &Color, second: &Color) -> bool {
     let (a_space, b_space) = (first.space(), second.space());
-    // 两个 legacy 颜色按**未取整的 RGB** 比（dart：`hsl(0, 0%, 50%)` = `rgb(127.5, …)`）。
+    // Two legacy colors are compared by their **unrounded RGB** (dart:
+    // `hsl(0, 0%, 50%)` = `rgb(127.5, …)`).
     if a_space.is_legacy() && b_space.is_legacy() {
         let (ar, ag, ab) = first.channels_f64();
         let (br, bg, bb) = second.channels_f64();
@@ -1317,7 +1351,8 @@ fn same(first: &Color, second: &Color) -> bool {
             && (ab - bb).abs() < 1e-11
             && (first.a - second.a).abs() < 1e-11;
     }
-    // 其余情况转换到第一个颜色的空间再比通道（legacy↔现代也允许，位置在 color1 的空间）。
+    // Otherwise convert to the space of the first color and compare channels (legacy
+    // <-> modern is allowed too; the position is in color1's space).
     let rhs = second.to_space(a_space);
     let (lhs, rhs) = (first.origin_channels(), rhs.origin_channels());
     (0..3).all(|i| match (lhs[i], rhs[i]) {
@@ -1397,8 +1432,9 @@ fn selector(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> V
     }
 }
 
-/// 解析实参里的选择器文本。`param` 为 `None` 表示 dart 不给参数名前缀
-/// （`selector.nest` / `selector.append` 用的是 `$selectors...` 展开）。
+/// Parse the selector text in the arguments. A `param` of `None` means dart adds no
+/// parameter name prefix (`selector.nest` / `selector.append` use the `$selectors...`
+/// expansion).
 fn selector_arg(value: &Value, param: Option<&str>, allow_parent: bool) -> ValResult<String> {
     let prefix = param.map(|name| format!("${name}: ")).unwrap_or_default();
     let text = match value {
@@ -1417,7 +1453,8 @@ fn selector_arg(value: &Value, param: Option<&str>, allow_parent: bool) -> ValRe
     Ok(text)
 }
 
-/// 解析「逗号分隔的复杂选择器列表」；失败报 `$selector: expected selector.`
+/// Parse a "comma-separated list of complex selectors"; on failure report
+/// `$selector: expected selector.`
 fn parse_list(text: &str, param: &str) -> ValResult<Vec<Sel>> {
     let expected = || format!("${param}: expected selector.");
     let text = text.trim();
@@ -1438,8 +1475,9 @@ fn parse_list(text: &str, param: &str) -> ValResult<Vec<Sel>> {
     Ok(out)
 }
 
-/// 解析一条复杂选择器：属性选择器的引号按标识符规则去掉（dart 的
-/// `AttributeSelector` 序列化：`a[href="x"]` → `a[href=x]`）。
+/// Parse one complex selector: quotes of attribute selectors are dropped per the
+/// identifier rules (dart's `AttributeSelector` serialization: `a[href="x"]` ->
+/// `a[href=x]`).
 fn parse_complex(text: &str) -> Option<Sel> {
     if text.is_empty() || text.contains(['!', ';', '{', '}']) {
         return None;
@@ -1456,7 +1494,8 @@ fn parse_complex(text: &str) -> Option<Sel> {
     Some(sel)
 }
 
-/// `[href="x"]` → `[href=x]`（只在值本身是 CSS 标识符时去引号）。
+/// `[href="x"]` -> `[href=x]` (quotes are only dropped when the value itself is a CSS
+/// identifier).
 fn unquote_attribute(simple: &str) -> String {
     if !simple.starts_with('[') || !simple.ends_with(']') {
         return simple.to_string();
@@ -1501,8 +1540,9 @@ fn split_top_level_commas(text: &str) -> Vec<&str> {
     out
 }
 
-/// `Sel` → Sass 值：每个复合选择器一个字符串，组合符单独成项（dart 的
-/// `ComplexSelector.asSassList` 就是这样，`selector.parse(".a > .b")` 的第 2 项是 `>`）。
+/// `Sel` -> Sass value: one string per complex selector, combinators become their own
+/// items (that is dart's `ComplexSelector.asSassList`; item 2 of
+/// `selector.parse(".a > .b")` is `>`).
 fn sel_value(sel: &Sel) -> Value {
     let mut items = Vec::new();
     for part in &sel.parts {
@@ -1541,8 +1581,8 @@ fn simple_selectors(text: &str, param: &str) -> ValResult<Vec<String>> {
     Ok(part.compound.simples.clone())
 }
 
-/// `selector.nest` / `selector.append`：都是把多个选择器按笛卡尔积组合，
-/// 区别只在连接方式（后代 vs 复合）。
+/// `selector.nest` / `selector.append`: both combine several selectors as a cartesian
+/// product; they only differ in how they join (descendant vs compound).
 fn combine(name: &str, positional: &[Value], keywords: &[(String, Value)]) -> ValResult<Value> {
     if let Some((name, _)) = keywords.first() {
         return Err(format!("No argument named ${name}."));
@@ -1606,8 +1646,9 @@ fn append(left: &[Sel], right: &[Sel]) -> Vec<Sel> {
     out
 }
 
-/// 简单选择器在复合选择器里的排序权重（dart 的序列化顺序）：类型/通配 < id <
-/// class/属性/占位符 < 伪类 < 伪元素。
+/// Sort weight of a simple selector inside a compound selector (dart's serialization
+/// order): type/universal < id < class/attribute/placeholder < pseudo-class <
+/// pseudo-element.
 fn simple_rank(simple: &str) -> u8 {
     match simple.chars().next() {
         Some('#') => 1,
@@ -1618,7 +1659,7 @@ fn simple_rank(simple: &str) -> u8 {
     }
 }
 
-/// 复合选择器里的类型选择器（`a` / `*` / `ns|a`）。
+/// The type selector inside a compound selector (`a` / `*` / `ns|a`).
 fn type_selector(compound: &Compound) -> Option<&String> {
     compound.simples.iter().find(|simple| {
         simple
@@ -1628,7 +1669,8 @@ fn type_selector(compound: &Compound) -> Option<&String> {
     })
 }
 
-/// 复合选择器合并（dart 的 `unifyCompound`）：类型选择器必须一致，否则无法合并。
+/// Merge compound selectors (dart's `unifyCompound`): the type selectors must agree,
+/// otherwise they cannot be merged.
 fn merge_compound(first: &Compound, second: &Compound) -> Option<Compound> {
     let left = type_selector(first);
     let right = type_selector(second);
@@ -1643,7 +1685,7 @@ fn merge_compound(first: &Compound, second: &Compound) -> Option<Compound> {
             simples.push(simple.clone());
         }
     }
-    // 同时有类型选择器时，通配符 `*` 不再输出。
+    // When a type selector is present, the universal `*` is no longer output.
     if simples.len() > 1 {
         let has_type = simples.iter().any(|simple| {
             simple
@@ -1686,8 +1728,9 @@ fn unify_pair(a: &Sel, b: &Sel) -> Vec<Sel> {
     let Some(compound) = merge_compound(&a_last.compound, &b_last.compound) else {
         return Vec::new();
     };
-    // 两边都用同一个显式组合符接尾段时，两条前缀竖向合并（dart 实测
-    // `.a > .b` + `.c > .d` → `.c.a > .b.d`）。
+    // When both sides attach their tail with the same explicit combinator, the two
+    // prefixes merge vertically (observed with dart:
+    // `.a > .b` + `.c > .d` -> `.c.a > .b.d`).
     let vertical = a_last.combinator.is_some() && a_last.combinator == b_last.combinator;
     let prefixes = match (a_prefix.is_empty(), b_prefix.is_empty()) {
         (true, true) => vec![Vec::new()],
@@ -1713,7 +1756,8 @@ fn unify_pair(a: &Sel, b: &Sel) -> Vec<Sel> {
         .collect()
 }
 
-/// 两条前缀的织入：都用同一个显式组合符接尾段时竖向合并，否则两种顺序各一份。
+/// Weaving of two prefixes: when both attach their tail with the same explicit
+/// combinator they merge vertically, otherwise each order gets its own copy.
 fn combine_prefixes(
     a: &[super::extend::Part],
     b: &[super::extend::Part],
@@ -1763,7 +1807,8 @@ fn complex_superselector(sup: &Sel, sub: &Sel) -> bool {
             if sup.parts.len() == 1 {
                 return true;
             }
-            // 后代组合符：sup 的前缀要能按顺序匹配 sub 前缀的某个后缀。
+            // Descendant combinator: the prefix of sup must match some suffix of the sub
+            // prefix in order.
             let sup_prefix = &sup.parts[..sup.parts.len() - 1];
             let sub_prefix = &sub.parts[..sub.parts.len() - 1];
             if sub_prefix.is_empty() {
@@ -1792,7 +1837,8 @@ fn suffix_super(sup: &[super::extend::Part], sub: &[super::extend::Part]) -> boo
         if !compound_superselector(&part.compound, &candidate.compound) {
             return false;
         }
-        // 组合符：sup 有就必须完全一致；sup 是后代组合符则放宽。
+        // Combinator: when sup has one it must match exactly; a descendant combinator in
+        // sup is more lenient.
         if let Some(c) = part.combinator {
             if candidate.combinator != Some(c) {
                 return false;
@@ -1829,8 +1875,9 @@ fn compound_superselector(sup: &Compound, sub: &Compound) -> bool {
     })
 }
 
-/// `selector.replace` / `selector.extend`：把命中的复合选择器替换成
-/// `replacement`（extend 保留原选择器，replace 不保留）。dart 会替换**所有**命中位置。
+/// `selector.replace` / `selector.extend`: replace the matching compound selectors with
+/// `replacement` (extend keeps the original selector, replace does not). dart replaces
+/// **all** matching positions.
 fn replace_value(
     base: &str,
     original: &str,

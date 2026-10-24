@@ -1,4 +1,4 @@
-// 嵌套属性：`prop: { sub: v }` 展开成 `prop-sub`。外层有值时先输出外层。
+// nested properties: `prop: { sub: v }` expands to `prop-sub`. When the outer property has a value, emit it first.
 @mixin bg-color {
   color: #fff;
 }
@@ -16,7 +16,7 @@
   }
 }
 
-// 多层嵌套拼名字；@include / @if 里的声明同样带前缀。
+// multiple nesting levels concatenate names; declarations inside @include / @if carry the prefix as well.
 .c {
   font: {
     family: serif;
@@ -41,7 +41,7 @@
   }
 }
 
-// 空块整条丢弃。
+// an empty block is dropped entirely.
 .f {
   outline: {}
 }

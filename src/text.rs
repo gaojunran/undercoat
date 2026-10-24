@@ -1,21 +1,24 @@
-//! 文本扫描原语：CSS/Less/Sass 源文本里的引号、注释、括号与顶层切分。
+//! Text-scanning primitives: quotes, comments, brackets, and top-level splitting in
+//! CSS/Less/Sass source text.
 //!
-//! 全部按**字节**扫描（UTF-8 的续字节不会与 ASCII 结构字符冲突），返回字节偏移。
-//! 调用方按需换算成自身使用的单位（区间、切片、字符下标）。
+//! Everything scans **byte-wise** (UTF-8 continuation bytes never collide with ASCII
+//! structural characters) and returns byte offsets. Callers convert to whatever unit they
+//! need (ranges, slices, character indices).
 //!
-//! 两个边界约定：
-//! - 引号未闭合时扫描到文本末尾（`skip_string` 返回 `len`）。
-//! - 注释未闭合时同样到文本末尾（`skip_comment` 返回 `len`）。
+//! Two boundary conventions:
+//! - An unterminated quote scans to the end of the text (`skip_string` returns `len`).
+//! - An unterminated comment likewise runs to the end (`skip_comment` returns `len`).
 
-/// `i` 指向引号，返回闭引号**之后**的偏移；未闭合返回 `len`。
+/// `i` points at a quote; returns the offset **after** the closing quote, or `len` if
+/// unterminated.
 pub(crate) fn skip_string(src: &str, i: usize) -> usize {
     let bytes = src.as_bytes();
     let quote = bytes[i];
     let mut j = i + 1;
     while j < bytes.len() {
         match bytes[j] {
-            // 转义：跳过下一个字节（可能是多字节字符的一部分，但只跳 1 也安全，
-            // 因为后续字节不会等于 ASCII 引号）。
+            // Escape: skip the next byte (it may be part of a multi-byte character, but skipping
+            // just 1 is still safe, because the following bytes never equal an ASCII quote).
             b'\\' => j += 2,
             b if b == quote => return j + 1,
             _ => j += 1,
@@ -24,9 +27,11 @@ pub(crate) fn skip_string(src: &str, i: usize) -> usize {
     bytes.len()
 }
 
-/// `i` 指向 `/` 且后随 `*` 或 `/` 时，返回注释**之后**的偏移；不是注释返回 `None`。
+/// When `i` points at `/` followed by `*` or `/`, returns the offset **after** the comment;
+/// returns `None` if it is not a comment.
 ///
-/// `/* */` 与 `//`（后者到行尾，不吞换行）都支持。
+/// Both `/* */` and `//` are supported (the latter runs to end of line and does not swallow
+/// the newline).
 pub(crate) fn skip_comment(src: &str, i: usize) -> Option<usize> {
     let bytes = src.as_bytes();
     if bytes.get(i) != Some(&b'/') {
@@ -54,10 +59,10 @@ pub(crate) fn skip_comment(src: &str, i: usize) -> Option<usize> {
     }
 }
 
-/// `open` 指向 `(` / `[` / `{`，返回配对闭符**之后**的偏移。
+/// `open` points at `(` / `[` / `{`; returns the offset **after** the matching closer.
 ///
-/// 跳过引号字符串（含转义）与任意嵌套的三种括号；不识别注释（`url(//host)` 里的
-/// `//` 是路径而非注释）。
+/// Skips quoted strings (including escapes) and arbitrarily nested brackets of all three
+/// kinds; does not recognize comments (the `//` in `url(//host)` is a path, not a comment).
 pub(crate) fn matching(src: &str, open: usize) -> Option<usize> {
     let bytes = src.as_bytes();
     if !matches!(bytes.get(open), Some(b'(' | b'[' | b'{')) {
@@ -85,9 +90,10 @@ pub(crate) fn matching(src: &str, open: usize) -> Option<usize> {
     None
 }
 
-/// 按顶层 `sep` 切分，返回各段的字节区间（不含分隔符）。
+/// Split on top-level `sep` and return the byte range of each piece (excluding the separator).
 ///
-/// 跳过引号字符串、注释与嵌套括号；分隔符本身不进任何一段，空段保留。
+/// Skips quoted strings, comments, and nested brackets; the separator itself belongs to no
+/// piece, and empty pieces are kept.
 pub(crate) fn split_top_level(src: &str, sep: u8) -> Vec<(usize, usize)> {
     let bytes = src.as_bytes();
     let mut out = Vec::new();
@@ -157,19 +163,19 @@ mod tests {
         let src = "a, (b, c), \"d,e\", f";
         let got = pieces(src, b',');
         assert_eq!(got, ["a", " (b, c)", " \"d,e\"", " f"]);
-        // 区间回切原文
+        // Ranges slice the original back out
         let ranges = split_top_level(src, b',');
         assert_eq!(ranges[1], (2, 9));
-        // 注释里的分隔符不切
+        // Separators inside comments do not split
         assert_eq!(pieces("a /* , */ , b", b','), ["a /* , */ ", " b"]);
-        // 空段保留
+        // Empty pieces are kept
         assert_eq!(pieces("a,,b", b','), ["a", "", "b"]);
         assert_eq!(pieces("", b','), [""]);
     }
 
     #[test]
     fn escapes_keep_quotes_open() {
-        // `\'` 不是闭引号，整个字符串是 `'a\'b'`
+        // `\'` is not a closing quote, so the whole string is `'a\'b'`
         assert_eq!(pieces("'a\\'b', c", b','), ["'a\\'b'", " c"]);
         assert_eq!(skip_string("'a\\'b'", 0), 6);
     }

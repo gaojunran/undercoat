@@ -1,5 +1,5 @@
-// `&` 出现在函数式伪类参数里：用**整份父列表**代入，不做笛卡尔积；
-// 其余位置的 `&` 仍然是笛卡尔积。
+// `&` inside a functional pseudo-class argument: substitute the **whole parent list** rather than doing a cartesian product;
+// `&` elsewhere is still a cartesian product.
 .a {
   :not(&) { x: 1 }
 }

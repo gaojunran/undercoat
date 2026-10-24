@@ -1,4 +1,4 @@
-// @return 出现在控制流深处：@if / @each / @for / @while 里提前返回。
+// @return deep inside control flow: early returns from @if / @each / @for / @while.
 @function find-first-key($map, $target) {
   @each $k, $v in $map {
     @if $v == $target {

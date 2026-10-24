@@ -1,4 +1,4 @@
-// keyframe 选择器列表没有换行概念：必须并成一条 `, ` 分隔的行。
+// a keyframe selector list has no notion of line breaks: it must be joined into one line separated by `, `.
 @keyframes d {
   0%,
   50%,
@@ -7,7 +7,7 @@
   }
 }
 
-// `from` / `to` 与百分比混写、还有多余空白。
+// `from` / `to` mixed with percentages, plus redundant whitespace.
 @-webkit-keyframes e {
   from,
   to { x: 1 }
@@ -18,7 +18,7 @@
   }
 }
 
-// 单行列表保持原样；层叠缩进（规则里的 keyframes）也不受影响。
+// a single-line list stays as is; stacked indentation (keyframes inside a rule) is unaffected too.
 .a {
   @keyframes f {
     0%,

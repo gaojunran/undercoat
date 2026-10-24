@@ -1,17 +1,20 @@
-//! SCSS 编译入口：装配（`@import` / `@use`）→ 解析（oxc `Syntax::Scss`）→ 求值 → 序列化。
+//! SCSS compile entry: assembly (`@import` / `@use`) -> parse (oxc `Syntax::Scss`) ->
+//! evaluation -> serialization.
 //!
-//! `.sass` 缩进语法在装载期由 [`indented::to_scss`] 折成等义 SCSS 文本，
-//! 因此这里的合并文本永远是 SCSS 形态（解析器固定 `Syntax::Scss`）。
+//! The `.sass` indented syntax is folded into equivalent SCSS text at load time by
+//! [`indented::to_scss`], so the merged text here is always in SCSS form (the parser is
+//! fixed to `Syntax::Scss`).
 //!
-//! S1 覆盖变量 / 作用域 / 嵌套 / 插值 / `@import` / `@use`（最小）与驱动它们的
-//! SassScript 表达式求值；mixin / 函数 / 控制流仍显式报错，不静默产出错误产物。
+//! S1 covers variables / scope / nesting / interpolation / `@import` / `@use` (minimal)
+//! and the SassScript expression evaluation that drives them; mixins / functions / control
+//! flow still report an explicit error instead of silently producing broken output.
 
 pub(crate) mod builtins;
 mod color_space;
 pub(crate) mod eval;
 pub(crate) mod extend;
 pub(crate) mod imports;
-// 测试钩子（`tests/sass_conversion_ast.rs` 直接调用），非产品 API。
+// Test hook (called directly by `tests/sass_conversion_ast.rs`), not a product API.
 #[doc(hidden)]
 pub mod indented;
 pub(crate) mod modules;
@@ -45,16 +48,19 @@ use self::emit::*;
 use self::prelude::*;
 use self::selector::*;
 
-/// mixin 递归上限（dart-sass 自身在 300 层左右栈溢出；这里显式报错而不是崩）。
+/// Mixin recursion limit (dart-sass itself overflows the stack at around 300 levels;
+/// here it is an explicit error instead of a crash).
 const MAX_MIXIN_DEPTH: usize = 256;
 
-/// 编译 SCSS / 纯 CSS。`path` 只用于报错、依赖解析与 sourcemap 的 `sources`。
+/// Compile SCSS / plain CSS. `path` is only used for error reporting, dependency
+/// resolution and the sourcemap's `sources`.
 pub(crate) fn compile(
     path: &Path,
     source: &str,
     opts: &Options,
 ) -> Result<Output, Box<CompileError>> {
-    // ParserBuilder 会自行剥 BOM，这里先剥掉以保证 span 与本函数的 src 对齐。
+    // ParserBuilder strips the BOM itself, but it is stripped here first so that spans
+    // line up with this function's src.
     let source = source.strip_prefix('\u{feff}').unwrap_or(source);
     let Loaded {
         merged,
@@ -70,7 +76,8 @@ pub(crate) fn compile(
         .chain(std::iter::once((0, 0)))
         .collect();
 
-    // 合并文本永远是 SCSS 形态：`.sass` 片段在 `imports::Loader` 装载时就已改写。
+    // The merged text is always in SCSS form: `.sass` segments have already been
+    // rewritten when `imports::Loader` loaded them.
     let alloc = Allocator::default();
     let mut parser = ParserBuilder::new(&alloc, src)
         .syntax(Syntax::Scss)
@@ -78,8 +85,9 @@ pub(crate) fn compile(
         .build();
     let ast = parser
         .parse::<Stylesheet>()
-        .map_err(|e| merged.error_at(e.span.start, format!("SCSS 解析失败: {}", e.kind)))?;
-    // 声明类 at-rule 的容器校验（dart 在解析期做，与执行路径无关）。
+        .map_err(|e| merged.error_at(e.span.start, format!("SCSS parse failure: {}", e.kind)))?;
+    // Container check of declaration-like at-rules (dart does it at parse time,
+    // independent of the execution path).
     validate_structure(&merged, &ast.statements)?;
 
     let comments: Vec<CommentRec> = parser
@@ -138,10 +146,12 @@ pub(crate) fn compile(
     Ok(Output { css, map, deps })
 }
 
-/// 根层 CSS `@import` 前移到「开头的注释/import 段」之后（dart-sass 实测）。
+/// Move root-level CSS `@import`s after the "leading comment/import section" (observed
+/// with dart-sass).
 ///
-/// 只有出现在其它语句之后的 import 才前移；移动保持彼此相对顺序，
-/// 开头的注释不跨过（`/* c */ @import` 保持注释在前）。
+/// Only imports that appear after other statements are moved; the move keeps their
+/// relative order, and leading comments are not crossed (`/* c */ @import` keeps the
+/// comment first).
 fn hoist_imports(items: Vec<Item>) -> Vec<Item> {
     let is_import = |item: &Item| matches!(item, Item::AtRule(at) if at.body.is_none() && at.name.eq_ignore_ascii_case("import"));
     let prefix = items
@@ -161,12 +171,14 @@ fn hoist_imports(items: Vec<Item>) -> Vec<Item> {
     keep
 }
 
-/// 一个选择器列表：输出文本 + 拆开后的各条选择器（供嵌套解析）。
+/// One selector list: output text + the individual selectors after splitting (used by
+/// nested parsing).
 struct SelectorSet {
     parts: Vec<Sel>,
 }
 
-/// 一条复杂选择器 + dart-sass `ComplexSelector.lineBreak`（序列化时在它之前换行）。
+/// One complex selector plus dart-sass `ComplexSelector.lineBreak` (serialization breaks
+/// the line before it).
 struct Sel {
     text: String,
     line_break: bool,
@@ -177,7 +189,7 @@ impl SelectorSet {
         self.parts.is_empty()
     }
 
-    /// 序列化选择器列表；`keep` 用来滤掉占位符选择器（`%p`）。
+    /// Serialize a selector list; `keep` filters out placeholder selectors (`%p`).
     fn render(&self, keep: impl Fn(&Sel) -> bool) -> String {
         let mut out = String::new();
         for part in self.parts.iter().filter(|p| keep(p)) {
@@ -196,11 +208,12 @@ struct CommentRec {
     span: Span,
 }
 
-/// 一个形参（`@mixin` / `@function` 共用，定义在 `eval` 里）。
+/// One parameter (`@mixin` / `@function` share it; defined in `eval`).
 type Param<'a> = eval::Param<'a>;
 
-/// mixin 定义。`depth` 是定义处的帧数：调用时把帧栈截到这里（词法闭包），
-/// 这样 mixin 体看不到调用方的局部变量，但能看到定义处的环境。
+/// A mixin definition. `depth` is the frame count at the definition site: a call truncates
+/// the frame stack to it (lexical closure), so that the mixin body cannot see the caller's
+/// locals but can see the definition-time environment.
 #[derive(Clone)]
 struct MixinDef<'a> {
     params: Vec<Param<'a>>,
@@ -212,9 +225,11 @@ struct MixinDef<'a> {
     has_content: bool,
 }
 
-/// `@include m { ... }` 的 content 块：按调用方环境求值（词法闭包）。
-/// `tail` 是在 `@include` 处从调用方帧栈里摘下的部分（`def.scope == 调用方 scope` 时才有），
-/// 每次 `@content` 时换回调用方环境，执行完再把变动写回这里。
+/// The content block of `@include m { ... }`: evaluated in the caller's environment
+/// (lexical closure).
+/// `tail` is the part taken off the caller's frame stack at `@include` (only present when
+/// `def.scope == the caller's scope`); every `@content` switches back to the caller's
+/// environment and writes the changes back here afterwards.
 #[derive(Clone)]
 struct ContentBlock<'a> {
     params: Vec<Param<'a>>,
@@ -226,8 +241,8 @@ struct ContentBlock<'a> {
     tail: Vec<eval::Frame<'a>>,
     mixins_tail: Vec<HashMap<String, MixinDef<'a>>>,
     cursor: usize,
-    /// 创建这个块时「生效中」的 content 块（dart 的 `_contentBlock` 捕获）：
-    /// 块里的 `@content` 指向它，而不是指向自己。
+    /// The content block "in effect" when this block was created (dart's `_contentBlock`
+    /// capture): `@content` inside the block points at it, not at the block itself.
     outer: Option<usize>,
 }
 
@@ -236,41 +251,50 @@ struct Converter<'a> {
     opts: &'a Options,
     eval: Evaluator<'a>,
     modules: &'a HashMap<PathBuf, ModuleInfo>,
-    /// 文件 id → 作用域编号（`@use` 的模块有自己的作用域）。
+    /// File id -> scope id (a module loaded by `@use` has its own scope).
     scope_of: &'a HashMap<u32, usize>,
-    /// 作用域 → 拥有它的模块文件（其余文件都是 `@import` 内联进来的）。
+    /// Scope -> the module file owning it (all other files are inlined by `@import`).
     module_file: &'a HashMap<usize, u32>,
     comments: Vec<CommentRec>,
     cursor: usize,
-    /// 每个作用域一套 mixin 帧（与变量帧同步压/弹）。
+    /// One mixin frame per scope (pushed/popped in sync with the variable frames).
     mixins: Vec<Vec<HashMap<String, MixinDef<'a>>>>,
-    /// 每次 mixin 调用的 content 块槽位（`None` = 该 mixin 没收到 content 块）。
-    /// 栈顶是「当前生效」的 content 块，与 dart 的 `_contentBlock` 一致。
+    /// Slot for the content block of each mixin call (`None` = that mixin received no
+    /// content block).
+    /// The top of the stack is the "currently effective" content block, consistent with
+    /// dart's `_contentBlock`.
     content: Vec<Option<usize>>,
-    /// content 块本体（用索引引用，重复 `@content` 需要多次执行同一个块）。
+    /// The content block bodies themselves (referenced by index, since repeating
+    /// `@content` must execute the same block several times).
     content_blocks: Vec<ContentBlock<'a>>,
-    /// 当前 mixin 调用嵌套层数（递归上限）。
+    /// Current mixin call nesting depth (the recursion limit).
     mixin_depth: usize,
-    /// 当前控制指令（`@if`）嵌套层数：mixin 定义禁止出现在里面。
+    /// Current control directive (`@if`) nesting depth: a mixin definition is not allowed
+    /// inside one.
     control_depth: usize,
     in_mixin: bool,
-    /// 声明列表上下文（`@font-face` 等）：允许裸声明。
+    /// Declaration-list context (`@font-face` etc.): bare declarations are allowed.
     decl_context: bool,
-    /// 嵌套属性块（`font: { family: serif }`）的属性名前缀。
+    /// Property-name prefix of a nested property block (`font: { family: serif }`).
     decl_prefix: Option<String>,
-    /// 当前嵌套深度（根 stylesheet 为 1）：`@use` 只允许在 1。
+    /// Current nesting depth (1 for the root stylesheet): `@use` is only allowed at 1.
     block_depth: usize,
-    /// 外层 `@media` 的 prelude 栈（嵌套 media 要并成一条查询）。
+    /// Stack of outer `@media` preludes (nested media must merge into a single query).
     media_stack: Vec<String>,
-    /// `@extend` 记录：全部编译完后统一作用到已产出的规则上。
+    /// `@extend` records: all of them are applied to the already emitted rules after the
+    /// whole compilation finishes.
     extensions: extend::Engine,
-    /// 块里最后一条**嵌套规则**有没有产出节点（空规则也算一个子节点，会「吃掉」
-    /// 空行标记：dart 的 `isGroupEnd` 落在最后一个子节点上，空规则随序列化一起消失）。
+    /// Whether the last **nested rule** in the block produced a node (an empty rule counts
+    /// as a child node and "eats" the blank-line marker: dart's `isGroupEnd` falls on the
+    /// last child node, and empty rules disappear with serialization).
     empty_tail: bool,
-    /// 当前块里是否出现过嵌套规则（决定 `empty_tail` 是看子节点还是看自己）。
+    /// Whether a nested rule has appeared in the current block (decides whether
+    /// `empty_tail` looks at the child nodes or at itself).
     had_child: bool,
-    /// 当前块里「等位置」的 hoisted 项（跨层合并的 media）。
-    /// dart 先关闭当前规则再吐这类节点，所以要把它们攒到声明之后。
+    /// Hoisted items "at the same position" in the current block (media merged across
+    /// levels).
+    /// dart closes the current rule before emitting such nodes, so they are accumulated
+    /// until after the declarations.
     pending_hoist: Vec<Vec<Item>>,
 }
 
@@ -279,12 +303,14 @@ impl<'a> Converter<'a> {
         &self.merged.text
     }
 
-    /// 语句所在文件的作用域（`@import` 内联的文件与导入者同作用域）。
+    /// Scope of the file containing the statement (files inlined by `@import` share the
+    /// importer's scope).
     fn scope_at(&self, at: usize) -> usize {
         *self.scope_of.get(&self.file_at(at)).unwrap_or(&0)
     }
 
-    /// 合并偏移 → 文件 id；未命中时回退到最后一个段（越界定位的 scss 语义）。
+    /// Merged offset -> file id; on a miss it falls back to the last segment (the scss
+    /// semantics for out-of-range locations).
     fn file_at(&self, at: usize) -> u32 {
         self.merged.locate_exact(at).map_or_else(
             || self.merged.segs.last().map_or(0, |seg| seg.file),
@@ -300,8 +326,9 @@ impl<'a> Converter<'a> {
         self.merged.error_at(e.at, e.message).into()
     }
 
-    /// `@at-root <selector> { ... }`：选择器相对于根解析，产物提到当前规则之外
-    /// （`@at-root a#{&}` 用来给 `.badge` 生成 `a.badge`）。
+    /// `@at-root <selector> { ... }`: the selector is resolved against the root and the
+    /// product is lifted out of the current rule (`@at-root a#{&}` is used to generate
+    /// `a.badge` for `.badge`).
     fn at_root_rule(
         &mut self,
         at: &'a oxc_css_parser::ast::AtRule<'a>,
@@ -317,13 +344,14 @@ impl<'a> Converter<'a> {
                 _ => {
                     return Err(self.err(
                         at.span.start,
-                        "SCSS 特性尚未实现（S3）: @at-root 的 query 形式",
+                        "SCSS feature not implemented yet (S3): query form of @at-root",
                     ));
                 }
             },
-            // 裸 `@at-root { ... }`：子规则按根层解析，但 `&` 仍是外层选择器。
+            // Bare `@at-root { ... }`: the child rules resolve against the root level, but
+            // `&` is still the outer selector.
             None => (None, at.span),
-            _ => return Err(self.err(at.span.start, "SCSS 解析失败: @at-root")),
+            _ => return Err(self.err(at.span.start, "SCSS parse failure: @at-root")),
         };
         let Some(block) = &at.block else {
             return Ok(());
@@ -334,7 +362,8 @@ impl<'a> Converter<'a> {
         let saved_parent = parent.map(|p| p.render(|_| true));
         let mut items = Vec::new();
         let scope = self.push_scope(false);
-        // `@at-root .x { ... }`：块里的 `&` 就是 `.x`；裸形式则仍是外层选择器。
+        // `@at-root .x { ... }`: `&` inside the block is `.x`; the bare form keeps the
+        // outer selector.
         self.eval.set_parent_selector(match &selectors {
             Some(sels) => Some(sels.render(|_| true)),
             None => saved_parent.clone(),
@@ -360,28 +389,31 @@ impl<'a> Converter<'a> {
         self.eval.set_parent_selector(saved_parent);
         self.pop_scope(scope);
         result?;
-        // `@at-root` 的产物是根层节点：dart 会给最后一个子节点打上分组结尾。
+        // The product of `@at-root` is a root-level node: dart marks the last child node as
+        // a group end.
         if !tail_empty {
             if let Some(item) = items.last_mut() {
                 mark_group_end(item);
             }
         }
         out.extend(items);
-        // `@at-root` 产出的空规则也是「一个子节点」：会吃掉外层规则的空行标记。
+        // An empty rule produced by `@at-root` is also "a child node": it eats the
+        // blank-line marker of the outer rule.
         self.empty_tail = tail_empty;
         self.had_child = true;
         Ok(())
     }
 
-    /// `@extend <compound> [!optional]`：只登记，编译结束后统一作用（dart 同样是
-    /// 全局的扩展表，后来的 `@extend` 会影响先前产出的规则）。
+    /// `@extend <compound> [!optional]`: only registers, and everything is applied after
+    /// the compilation ends (dart also has a global extension table, so a later `@extend`
+    /// affects rules produced earlier).
     fn extend_rule(
         &mut self,
         at: &'a oxc_css_parser::ast::AtRule<'a>,
         parent: Option<&SelectorSet>,
     ) -> Result<(), Box<CompileError>> {
         let Some(AtRulePrelude::SassExtend(extend)) = &at.prelude else {
-            return Err(self.err(at.span.start, "SCSS 解析失败: @extend"));
+            return Err(self.err(at.span.start, "SCSS parse failure: @extend"));
         };
         let Some(parent) = parent else {
             return Err(self.err(at.span.start, "Extend may only be used within style rules."));
@@ -422,7 +454,8 @@ impl<'a> Converter<'a> {
         Ok(())
     }
 
-    /// 编译结束：扩展传递闭包 → 作用到每条规则 → `!optional` 校验。
+    /// End of compilation: extension transitive closure -> apply to every rule ->
+    /// `!optional` check.
     fn finish_extensions(&mut self, items: &mut Vec<Item>) -> Result<(), Box<CompileError>> {
         self.extensions.resolve();
         if std::env::var("EXT_DEBUG").is_ok() {
@@ -449,10 +482,12 @@ impl<'a> Converter<'a> {
         Ok(out)
     }
 
-    /// 一个完整块：执行语句，把声明按源码顺序封成若干条同选择器规则。
+    /// One complete block: execute the statements and pack the declarations into several
+    /// rules with the same selector, in source order.
     ///
-    /// 嵌套规则 / at-rule 之后再次出现的声明要另起一条规则（dart-sass 1.78 起
-    /// 的混合声明语义），所以这里不做「声明统一提到前面」。
+    /// Declarations that reappear after a nested rule / at-rule start a new rule (the
+    /// mixed-declaration semantics of dart-sass 1.78+), so declarations are not "all moved
+    /// to the front" here.
     fn block(
         &mut self,
         stmts: &'a [Statement<'a>],
@@ -465,9 +500,9 @@ impl<'a> Converter<'a> {
         let mut nested: Vec<Item> = Vec::new();
         self.pending_hoist.push(Vec::new());
         self.stmts(stmts, end, parent, parent_span, &mut decls, &mut nested)?;
-        // 块内被 hoist 出外层 at-rule 的 media 排在块自己的规则之后（dart 先关
-        // 闭当前规则再吐 hoisted 节点）：`@media {.b { @media M{} y:2 }}` 先出
-        // `.b { y: 2 }` 再出 M。
+        // Media hoisted out of the outer at-rule inside this block come after the block's
+        // own rules (dart closes the current rule before emitting hoisted nodes):
+        // `@media {.b { @media M{} y:2 }}` emits `.b { y: 2 }` first and M after.
         self.flush_pending_hoist(&mut decls, parent, parent_span, &mut nested)?;
         self.flush_rule(&mut decls, parent, parent_span, &mut nested)?;
         if let Some(pending) = self.pending_hoist.pop() {
@@ -477,7 +512,8 @@ impl<'a> Converter<'a> {
         Ok(())
     }
 
-    /// 吐出一批「等位置」的 hoisted 项：先把它们之前的声明封成规则。
+    /// Emit a batch of hoisted items "at the same position": first pack the declarations
+    /// before them into a rule.
     fn flush_pending_hoist(
         &mut self,
         decls: &mut Vec<DeclItem>,
@@ -495,10 +531,12 @@ impl<'a> Converter<'a> {
         Ok(())
     }
 
-    /// 把已收集的声明封成一条规则追加到 `nested`（空缓冲不动）。
+    /// Pack the collected declarations into one rule and append it to `nested` (an empty
+    /// buffer is left alone).
     ///
-    /// 调用点：块收尾，以及每次嵌套规则 / at-rule 产出之前——保证声明留在
-    /// 源码里它出现的位置，而不是被提到所有嵌套产出之前。
+    /// Call sites: at the end of a block, and before every nested rule / at-rule product --
+    /// so declarations stay where they appear in the source instead of being moved before
+    /// all nested products.
     fn flush_rule(
         &mut self,
         decls: &mut Vec<DeclItem>,
@@ -516,11 +554,13 @@ impl<'a> Converter<'a> {
                 "Declarations may only be used within style rules.",
             ));
         };
-        // 占位符选择器（`%p`）不直接产出 CSS：留给扩展阶段决定去向。
+        // A placeholder selector (`%p`) does not emit CSS directly: the extension phase
+        // decides where it goes.
         let selector = selectors.render(|_| true);
         if !selector.is_empty() {
-            // 以「登记时刻」的形态进入扩展引擎：此刻已有的扩展会立即作用，
-            // 之后的扩展只作用到已登记的规则上（dart 的增量语义）。
+            // Enter the extension engine in its "registration time" shape: existing
+            // extensions apply right away, later ones only apply to already registered rules
+            // (dart's incremental semantics).
             let parsed = selectors
                 .parts
                 .iter()
@@ -538,7 +578,8 @@ impl<'a> Converter<'a> {
         Ok(())
     }
 
-    /// 语句序列。收集器由调用方给：mixin 体 / `@if` 体的声明要并进调用处那条规则。
+    /// A statement sequence. The collector is provided by the caller: the declarations of a
+    /// mixin body / `@if` body must be merged into the rule at the call site.
     fn stmts(
         &mut self,
         stmts: &'a [Statement<'a>],
@@ -573,7 +614,8 @@ impl<'a> Converter<'a> {
                     nested.push(Item::Comment(c));
                 }
             })?;
-            // 后续语句不是声明了：先把攒着的 hoisted 项连同在前声明一起吐出。
+            // The following statements are no longer declarations: emit the accumulated
+            // hoisted items together with the preceding declarations first.
             if !matches!(st, Statement::Declaration(_)) {
                 self.flush_pending_hoist(decls, parent, parent_span, nested)?;
             }
@@ -626,15 +668,17 @@ impl<'a> Converter<'a> {
                 self.flush_rule(decls, parent, parent_span, nested)?;
                 self.nested_rule(rule, parent, nested)
             }
-            Statement::KeyframeBlock(_) => {
-                Err(self.err(st.span().start, "SCSS 特性尚未实现（S1）: 裸 keyframe 块"))
-            }
+            Statement::KeyframeBlock(_) => Err(self.err(
+                st.span().start,
+                "SCSS feature not implemented yet (S1): bare keyframe block",
+            )),
             Statement::SassIfAtRule(rule) => self.if_rule(rule, parent, parent_span, decls, nested),
-            // oxc 把 SCSS 自己的控制流/定义类 at-rule 归到 `UnknownSassAtRule`。
+            // oxc classifies SCSS's own control-flow/definition at-rules as
+            // `UnknownSassAtRule`.
             Statement::UnknownSassAtRule(at) => Err(self.err(
                 at.span.start,
                 format!(
-                    "SCSS 特性尚未实现（S2）: @{}",
+                    "SCSS feature not implemented yet (S2): @{}",
                     ident_name(&at.name).unwrap_or("?")
                 ),
             )),
@@ -642,14 +686,14 @@ impl<'a> Converter<'a> {
             other => Err(self.err(
                 st.span().start,
                 format!(
-                    "SCSS 特性尚未实现（S1）: {}",
+                    "SCSS feature not implemented yet (S1): {}",
                     snippet(self.src(), other.span().start, other.span().end)
                 ),
             )),
         }
     }
 
-    /// SCSS 专属 at-rule 与普通 CSS at-rule 的分派。
+    /// Dispatch between SCSS-specific at-rules and ordinary CSS at-rules.
     fn sass_at_rule(
         &mut self,
         at: &'a oxc_css_parser::ast::AtRule<'a>,
@@ -658,9 +702,11 @@ impl<'a> Converter<'a> {
         decls: &mut Vec<DeclItem>,
         nested: &mut Vec<Item>,
     ) -> Result<(), Box<CompileError>> {
-        // 按名字分派：`@content` 无参数时 prelude 是 `None`，不能靠 prelude 判别。
+        // Dispatch by name: `@content` without arguments has a `None` prelude, so the
+        // prelude cannot be used to tell them apart.
         let lower = at.name.name.to_ascii_lowercase();
-        // 嵌套属性块里只允许声明与这些控制指令（dart 的 `_declarationAtRule`）。
+        // Inside a nested property block only declarations and these control directives are
+        // allowed (dart's `_declarationAtRule`).
         if self.decl_prefix.is_some()
             && !matches!(
                 lower.as_str(),
@@ -685,12 +731,14 @@ impl<'a> Converter<'a> {
             "each" => return self.each_rule(at, parent, parent_span, decls, nested),
             "for" => return self.for_rule(at, parent, parent_span, decls, nested),
             "while" => return self.while_rule(at, parent, parent_span, decls, nested),
-            // `@use` / `@forward` 由装配层保证在顶层，这里只是成员登记。
+            // `@use` / `@forward` are guaranteed to be top-level by the assembly layer; here
+            // it is only member registration.
             "use" => return self.use_rule(at),
             "forward" => return self.forward_rule(at),
             _ => {}
         }
-        // 规则内的无块 `@import "x.css"`：dart 原样留在花括号里，不外提。
+        // A block-less `@import "x.css"` inside a rule: dart leaves it inside the braces
+        // instead of lifting it out.
         if parent.is_some() && at.block.is_none() && at.name.name.eq_ignore_ascii_case("import") {
             let raw = self.prelude_raw(at);
             let prelude = self
@@ -709,11 +757,13 @@ impl<'a> Converter<'a> {
         }
         let mut items = Vec::new();
         self.at_rule(at, parent, parent_span, &mut items)?;
-        // 只有真的产出了东西才切段：`@extend` / `@debug` 之类不打断声明顺序。
+        // Only split when something was really emitted: `@extend` / `@debug` and the like
+        // do not interrupt the declaration order.
         if items.is_empty() {
             return Ok(());
         }
-        // 层内被 hoist 的 media 要等本块声明先落地（见 `flush_pending_hoist`）。
+        // Media hoisted inside the layer must wait until this block's declarations land
+        // (see `flush_pending_hoist`).
         if parent.is_some() && items.iter().any(Item::is_hoisted) {
             if let Some(pending) = self.pending_hoist.last_mut() {
                 pending.extend(items);
@@ -725,7 +775,8 @@ impl<'a> Converter<'a> {
         Ok(())
     }
 
-    /// 压一层词法帧（变量帧 + mixin 帧一一对应），返回作用域编号供 `pop_scope` 用。
+    /// Push one lexical frame (variable frame and mixin frame correspond one-to-one) and
+    /// return the scope id for `pop_scope`.
     fn push_scope(&mut self, semi_global: bool) -> usize {
         let scope = self.eval.active_scope();
         self.eval.push_frame(semi_global);
@@ -743,12 +794,12 @@ impl<'a> Converter<'a> {
         self.eval.enter(saved);
     }
 
-    /// 注释游标：第一个位置 >= `at` 的注释下标。
+    /// Comment cursor: index of the first comment at position >= `at`.
     fn comment_cursor(&self, at: usize) -> usize {
         self.comments.partition_point(|c| c.span.start < at)
     }
 
-    /// 嵌套规则：选择器相对父选择器解析后作为独立规则输出。
+    /// Nested rule: the selector is resolved against the parent and output as its own rule.
     fn nested_rule(
         &mut self,
         rule: &'a QualifiedRule<'a>,
@@ -799,7 +850,8 @@ impl<'a> Converter<'a> {
         let _ = this_empty;
         self.empty_tail = tail_empty;
         self.had_child = true;
-        // 空行只加在「源级规则」的最后一个产物之后（嵌套规则之间不空行）。
+        // A blank line is only added after the last product of a "source-level rule" (no
+        // blank lines between nested rules).
         if root_rule && !tail_empty {
             if let Some(item) = out[before..].last_mut() {
                 mark_group_end(item);
@@ -848,14 +900,16 @@ impl<'a> Converter<'a> {
         match lower.as_str() {
             "charset" => return Ok(()),
             "use" => {
-                // `@use` 只能在文件顶层（dart-sass 同款文案）。
+                // `@use` is only allowed at the top level of a file (same wording as
+                // dart-sass).
                 if self.block_depth > 1 {
                     return Err(self.err(at.span.start, "This at-rule is not allowed here."));
                 }
                 return self.use_rule(at);
             }
             "debug" => {
-                // `@debug` 用 inspect 形态（map / 无引号字符串 / 颜色都按 Sass 写法）。
+                // `@debug` uses inspect form (maps / unquoted strings / colors are written
+                // the Sass way).
                 if let Some(AtRulePrelude::SassExpr(expr)) = &at.prelude {
                     let value = self
                         .eval
@@ -863,8 +917,9 @@ impl<'a> Converter<'a> {
                         .map_err(|e| self.eval_err(e))?;
                     let (path, line, _) = self.merged.position(at.span.start);
                     let message = match &value {
-                        // dart 的 `Value.toString()`：顶层带引号的字符串去掉引号，
-                        // 其它值走 inspect（map/list 里的字符串仍带引号）。
+                        // dart's `Value.toString()`: a top-level quoted string loses its
+                        // quotes, other values go through inspect (strings inside maps/lists
+                        // keep their quotes).
                         value::Value::Str(s) if s.quoted => s.text.clone(),
                         value => value.inspect(),
                     };
@@ -873,7 +928,8 @@ impl<'a> Converter<'a> {
                 return Ok(());
             }
             "warn" => {
-                // `@warn` 用 CSS 形态（map 之类不可输出为 CSS 的值直接报错，dart 实测）。
+                // `@warn` uses CSS form (values that cannot be output as CSS, such as maps,
+                // report an error; observed with dart).
                 if let Some(AtRulePrelude::SassExpr(expr)) = &at.prelude {
                     let value = self
                         .eval
@@ -885,7 +941,7 @@ impl<'a> Converter<'a> {
                     }
                     .map_err(|message| self.err(at.span.start, message))?;
                     let (path, line, column) = self.merged.position(at.span.start);
-                    // 列号按 dart 的报错格式从 1 开始。
+                    // The column starts at 1 following dart's error format.
                     eprintln!(
                         "WARNING: {message}\n    {path} {line}:{}  root stylesheet\n",
                         column + 1
@@ -894,7 +950,8 @@ impl<'a> Converter<'a> {
                 return Ok(());
             }
             "error" => {
-                // 报错正文是值的 inspect 形态（`@error "boom"` → `"boom"`）。
+                // The error body is the inspect form of the value (`@error "boom"` ->
+                // `"boom"`).
                 let message = match &at.prelude {
                     Some(AtRulePrelude::SassExpr(expr)) => self
                         .eval
@@ -905,7 +962,8 @@ impl<'a> Converter<'a> {
                 };
                 return Err(self.err(at.span.start, message));
             }
-            // 函数体外的 `@return` 已由静态容器校验拦下（这里只是兵底）。
+            // A `@return` outside a function body has already been rejected by the static
+            // container check (this is only a last resort).
             "return" => return Err(self.err(at.span.start, "This at-rule is not allowed here.")),
             "extend" => return self.extend_rule(at, parent),
             "forward" => {
@@ -914,9 +972,10 @@ impl<'a> Converter<'a> {
                 }
                 return self.forward_rule(at);
             }
-            // 没有可用 prelude 节点的 `@include` / `@content`（解析降级时）显式报错。
+            // An `@include` / `@content` without a usable prelude node (parser fallback) is
+            // an explicit error.
             "mixin" | "include" | "content" => {
-                return Err(self.err(at.span.start, format!("SCSS 解析失败: @{lower}")));
+                return Err(self.err(at.span.start, format!("SCSS parse failure: @{lower}")));
             }
             _ => {}
         }
@@ -936,7 +995,7 @@ impl<'a> Converter<'a> {
                     }
                 }
             } else if lower == "media" {
-                // 媒体查询的值是 SassScript：裸 `$var` 也要代入。
+                // The value of a media query is SassScript: a bare `$var` is substituted too.
                 let text = self.substitute_vars(&interpolated, base)?;
                 normalize_prelude(&text)
             } else if lower == "import" {
@@ -946,7 +1005,8 @@ impl<'a> Converter<'a> {
             }
         };
 
-        // 嵌套 `@media` 按 dart 的规则并成一条查询（交叉相乘；类型冲突的组合丢弃）。
+        // Nested `@media` merges into one query by dart's rules (cross product; pairs with
+        // conflicting types are dropped).
         let mut merged = false;
         if lower == "media" {
             if let Some(outer) = self.media_stack.last().cloned() {
@@ -991,7 +1051,7 @@ impl<'a> Converter<'a> {
                 } else if !matches!(st, Statement::AtRule(_)) {
                     return Err(self.err(
                         st.span().start,
-                        "SCSS 特性尚未实现（S1）: @keyframes 内的非常规语句",
+                        "SCSS feature not implemented yet (S1): unusual statement inside @keyframes",
                     ));
                 }
                 self.skip_comments(st.span().end);
@@ -1032,15 +1092,17 @@ impl<'a> Converter<'a> {
             group_end: false,
             hoist: merged_away,
         };
-        // 合并过的（或内含合并过的）media 要提到外层 media 之外：按顺序拆段，
-        // 段内重新包回本条 media，被 hoist 的子项成为兄弟节点。
+        // Media that were merged (or contain merged media) are lifted out of the outer
+        // media: split the segments in order, rewrap each segment in this media, and the
+        // hoisted children become sibling nodes.
         if let Some(Body::Rules(items)) = rule.body.clone() {
             if items.iter().any(Item::is_hoisted) {
                 let mut current: Vec<Item> = Vec::new();
                 let mut segments: Vec<Item> = Vec::new();
-                // 被 hoist 的子项把外层 media 拆开：只在新旧块交界处分段，
-                // 拆点之后的连续兄弟重新攒成一块（1.35.2 是每条规则一块，
-                // 现代 dart-sass 只在 hoist 处断开）。
+                // Hoisted children split the outer media: segments only break at the boundary
+                // between the old and new block, and consecutive siblings after the split
+                // point are collected into one block again (1.35.2 makes one block per rule,
+                // modern dart-sass only breaks at hoists).
                 for mut item in items {
                     if item.is_hoisted() {
                         item.clear_hoist();
@@ -1076,7 +1138,11 @@ mod tests {
             &Options::default(),
         )
         .unwrap_err();
-        assert!(err.message.contains("尚未实现"), "{}", err.message);
+        assert!(
+            err.message.contains("not implemented yet"),
+            "{}",
+            err.message
+        );
         assert_eq!(err.line, Some(2));
         assert_eq!(err.path.as_deref(), Some("t.scss"));
     }
@@ -1100,7 +1166,9 @@ mod tests {
         assert_eq!(normalize_prelude(" selector(:has(a))"), "selector(:has(a))");
     }
 
-    /// 属性选择器去引号只看值本身能不能当标识符：能则去，且**不能**吃掉后面的后代空格。
+    /// Dropping the quotes of an attribute selector only depends on whether the value itself
+    /// can be an identifier: if so the quotes go, and the following descendant space must
+    /// **not** be eaten.
     #[test]
     fn attribute_selector_quote_rules() {
         assert_eq!(
@@ -1116,13 +1184,14 @@ mod tests {
         );
     }
 
-    /// `@supports` 是结构化打印：冗余括号塌掉，但分组作为 and/or 操作数时留一层
-    /// （与 dart-sass 1.35.2 的 `_parenthesize` 逐条对齐）。
+    /// `@supports` is printed structurally: redundant parentheses collapse, but a group
+    /// used as an and/or operand keeps one level (matched item by item against dart-sass
+    /// 1.35.2's `_parenthesize`).
     #[test]
     fn supports_condition_parens() {
         fn supports(prelude: &str) -> String {
             let mut eval = Evaluator::new(1);
-            supports_prelude(prelude, &mut eval, 0).expect("prelude 应能打印")
+            supports_prelude(prelude, &mut eval, 0).expect("prelude should be printable")
         }
         assert_eq!(supports("((a:b))"), "(a: b)");
         assert_eq!(supports("(((a:b)))"), "(a: b)");
@@ -1145,13 +1214,14 @@ mod tests {
         );
         assert_eq!(supports("selector(:has(a))"), "selector(:has(a))");
         assert_eq!(supports("foo(bar)"), "foo(bar)");
-        // 同级混用 and/or 在 dart 里是句法错误
+        // Mixing and/or at the same level is a syntax error in dart
         let mut eval = Evaluator::new(1);
         let err = supports_prelude("(a:1) and (b:2) or (c:3)", &mut eval, 0).unwrap_err();
         assert_eq!(err.1, "Expected \"and\".");
     }
 
-    /// 函数式伪类参数里的 `&`：整份父列表代入；参数内部仍按列表语义 flattenVertically。
+    /// `&` inside functional pseudo-class arguments: the whole parent list is substituted;
+    /// inside the argument the list semantics (flattenVertically) still apply.
     #[test]
     fn pseudo_parent_selector_uses_whole_parent_list() {
         let parents = [
@@ -1187,7 +1257,8 @@ mod tests {
         );
     }
 
-    /// 兜底：任何产物的选择器里都不允许出现未替换的 `&`（否则就是无效 CSS）。
+    /// Safety net: no selector in any product may contain an unreplaced `&` (otherwise it
+    /// is invalid CSS).
     #[test]
     fn compiled_css_never_contains_parent_selector() {
         let source = r#"
@@ -1198,10 +1269,14 @@ mod tests {
 .a, .b { @media screen { :not(&) { x: 6 } } }
 "#;
         let out = compile(Path::new("t.scss"), source, &Options::default()).expect("compile");
-        assert!(!out.css.contains('&'), "产物残留 `&`:\n{}", out.css);
+        assert!(
+            !out.css.contains('&'),
+            "unreplaced `&` left in product:\n{}",
+            out.css
+        );
     }
 
-    /// 内置模块：命名空间成员、`as *`、`as` 别名、模块变量。
+    /// Built-in modules: namespace members, `as *`, the `as` alias, module variables.
     #[test]
     fn builtin_modules() {
         let css = |source: &str| {
@@ -1217,13 +1292,15 @@ mod tests {
             css("@use \"sass:math\" as m;\na { b: m.$pi }"),
             "a {\n  b: 3.1415926536;\n}"
         );
-        // `as *` 把成员并入全局，且**遮蔽**同名全局函数（`index("abc","b")` 全局是
-        // list 语义 → null，模块是 string 语义 → 2）。
+        // `as *` merges members into the global scope and **shadows** global functions of
+        // the same name (`index("abc","b")` has list semantics globally -> null, string
+        // semantics from the module -> 2).
         assert_eq!(
             css("@use \"sass:string\" as *;\na { b: index(\"abc\", \"b\"); c: length(\"abc\") }"),
             "a {\n  b: 2;\n  c: 3;\n}"
         );
-        // 内置模块不参与文件解析：同名用户文件不会顶替它。
+        // Built-in modules take no part in file resolution: a user file of the same name
+        // does not replace it.
         assert!(
             compile(
                 Path::new("t.scss"),
@@ -1234,7 +1311,7 @@ mod tests {
         );
     }
 
-    /// 模块函数的报错文案（1.35.2 逐字对齐）。
+    /// Error messages of module functions (matched word for word against 1.35.2).
     #[test]
     fn builtin_module_errors() {
         let err = |source: &str| {
@@ -1260,7 +1337,8 @@ mod tests {
         );
     }
 
-    /// 逐函数对拍覆盖不到的「反直觉」细节：deep-merge 的键顺序、list.slash 的空格。
+    /// Counter-intuitive details that the per-function conformance run cannot cover: the key
+    /// order of deep-merge and the spacing of list.slash.
     #[test]
     fn builtin_module_quirks() {
         let css = |source: &str| {
@@ -1268,19 +1346,20 @@ mod tests {
                 .expect("compile")
                 .css
         };
-        // dart 以第二张 map 的顺序为骨架。
+        // dart uses the order of the second map as the skeleton.
         assert_eq!(
             css("@use \"sass:map\" as m;\na { b: inspect(m.deep-merge((a: 1, b: 2), (c: 3))) }"),
             "a {\n  b: (c: 3, a: 1, b: 2);\n}"
         );
-        // `list.slash()` 序列化成 ` / `，源码里的 `a/b` 不带空格。
+        // `list.slash()` serializes as ` / `, while `a/b` in the source has no spaces.
         assert_eq!(
             css("@use \"sass:list\" as l;\na { b: l.slash(1, 2); c: 1/2 }"),
             "a {\n  b: 1 / 2;\n  c: 1/2;\n}"
         );
     }
 
-    /// 现代 dart-sass（1.93.2）才有的模块成员：颜色空间 API、`calc-*`、`string.split`。
+    /// Module members only available in modern dart-sass (1.93.2): the color space API,
+    /// `calc-*`, `string.split`.
     #[test]
     fn builtin_module_modern_members() {
         let css = |source: &str| {
@@ -1294,7 +1373,7 @@ mod tests {
             ),
             "a {\n  b: rgb;\n  c: oklch;\n  d: true;\n  e: false;\n}"
         );
-        // `channel()` 返回**带单位**的通道（`hue` 是 `deg`、`lightness` 是 `%`）。
+        // `channel()` returns the channel **with units** (`hue` is `deg`, `lightness` is `%`).
         assert_eq!(
             css(
                 "@use \"sass:color\" as c;\na { b: c.channel(#123456, \"red\"); c: c.channel(hsl(120, 50%, 50%), \"hue\"); d: c.channel(oklch(0.5 0.1 20), \"chroma\") }"
@@ -1319,7 +1398,8 @@ mod tests {
             ),
             "a {\n  b: \"calc\";\n  c: 1px + 2%;\n  d: 1px, 2%;\n}"
         );
-        // `$limit` 是**切分次数**上限（limit 2 → 3 段），结果是括号化逗号 list。
+        // `$limit` is an upper bound on the **number of splits** (limit 2 -> 3 parts), and
+        // the result is a bracketed comma list.
         assert_eq!(
             css(
                 "@use \"sass:string\" as s;\na { b: s.split(\"a-b-c\", \"-\", 2); c: s.split(\"abc\", \"\") }"
@@ -1332,7 +1412,8 @@ mod tests {
         );
     }
 
-    /// 转义序列在 prelude 里要重新序列化，终止空格不能被括号/逗号处的去空格吃掉。
+    /// Escape sequences must be re-serialized in a prelude, and the terminator space must
+    /// not be eaten by the whitespace removal at parentheses/commas.
     #[test]
     fn prelude_escapes() {
         assert_eq!(
@@ -1347,7 +1428,8 @@ mod tests {
             normalize_prelude("(min-width: 4\\25 )"),
             "(min-width: 4\\%)"
         );
-        // `\\61` 后的第一个空格属于转义，第二个才是真空格。
+        // The first space after `\\61` belongs to the escape; only the second is a real
+        // space.
         assert_eq!(normalize_prelude("(a\\61 b)"), "(aab)");
         assert_eq!(normalize_prelude("(a\\61  b)"), "(aa b)");
         assert_eq!(normalize_prelude("(x\\.y)"), "(x\\.y)");

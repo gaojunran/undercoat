@@ -1,7 +1,8 @@
-//! `@extend` 的选择器合并：复合选择器是「简单选择器序列」，合并只在对应位置插入，
-//! 伪元素永远保持在最后（dart-sass 1.93.2 的 `unifyCompound` / `weave`）。
+//! Selector merging for `@extend`: a compound selector is a "sequence of simple
+//! selectors", merging only inserts at the corresponding position, and a pseudo-element
+//! always stays last (dart-sass 1.93.2's `unifyCompound` / `weave`).
 //!
-//! 期望产物逐字节取自 dart-sass 1.93.2 expanded 输出。
+//! Expected output is taken byte-for-byte from dart-sass 1.93.2 expanded output.
 
 use undercoat::{Options, compile_file};
 
@@ -15,7 +16,8 @@ fn compile(name: &str, source: &str) -> String {
         .css
 }
 
-/// 缺陷复现：伪元素后面不能再跟伪类，扩展出来的选择器必须仍是合法 CSS。
+/// Bug repro: a pseudo-element cannot be followed by a pseudo-class, so the extended
+/// selectors must still be valid CSS.
 #[test]
 fn pseudo_element_stays_last_when_extending() {
     assert_eq!(
@@ -30,7 +32,8 @@ fn pseudo_element_stays_last_when_extending() {
     );
 }
 
-/// 作者写在伪元素后面的伪类不重排（`::before:hover` 保持原样）。
+/// Pseudo-classes that authors write after a pseudo-element are not reordered
+/// (`::before:hover` stays as written).
 #[test]
 fn author_written_pseudo_element_order_is_kept() {
     assert_eq!(
@@ -45,7 +48,8 @@ fn author_written_pseudo_element_order_is_kept() {
     );
 }
 
-/// 多个伪类链、属性选择器、类型选择器的相对位置都不变。
+/// Relative positions of multiple pseudo-class chains, attribute selectors and type
+/// selectors are all unchanged.
 #[test]
 fn pseudo_class_chain_and_attribute_selector_keep_their_places() {
     assert_eq!(
@@ -60,7 +64,7 @@ fn pseudo_class_chain_and_attribute_selector_keep_their_places() {
     );
 }
 
-/// `A extends B, B extends C` 的传递链顺序仍正确。
+/// The ordering of the transitive chain `A extends B, B extends C` is still correct.
 #[test]
 fn transitive_extends_preserve_pseudo_element_order() {
     assert_eq!(
@@ -75,7 +79,8 @@ fn transitive_extends_preserve_pseudo_element_order() {
     );
 }
 
-/// 被扩展选择器本身带伪元素时，扩展者的简单选择器插在伪元素之前。
+/// When the extended selector itself carries a pseudo-element, the extender's simple
+/// selectors are inserted before it.
 #[test]
 fn extending_a_compound_with_pseudo_element_inserts_before_it() {
     assert_eq!(
@@ -89,7 +94,8 @@ fn extending_a_compound_with_pseudo_element_inserts_before_it() {
     );
 }
 
-/// 多段扩展者织入时同时产出「父级在前」的另一种交错（dart 的 `weave`）。
+/// Weaving multi-part extenders also produces the other interleaving, with parents
+/// first (dart's `weave`).
 #[test]
 fn weave_emits_extender_parents_before_the_extended_selector() {
     assert_eq!(
@@ -102,7 +108,8 @@ fn weave_emits_extender_parents_before_the_extended_selector() {
     );
 }
 
-/// 两个不同的伪元素无法合并成一个复合选择器，dart 丢弃扩展产物。
+/// Two different pseudo-elements cannot be merged into one compound selector, so dart
+/// drops the extended result.
 #[test]
 fn conflicting_pseudo_elements_drop_the_extended_selector() {
     assert_eq!(
@@ -114,7 +121,8 @@ fn conflicting_pseudo_elements_drop_the_extended_selector() {
     );
 }
 
-/// `@import` 的 `url(...)` 参数按 dart 的写法统一双引号（字符串含 `"` 时保留单引号）。
+/// `url(...)` arguments of `@import` are uniformly double-quoted as dart does (single
+/// quotes are kept when the string contains `"`).
 #[test]
 fn import_url_strings_are_double_quoted() {
     assert_eq!(

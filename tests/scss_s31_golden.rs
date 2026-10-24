@@ -1,9 +1,10 @@
-//! S3.1 golden 对拍：真实小程序语料里的三类纯 CSS 打印缺陷
-//! （keyframe 选择器列表单行、块注释续行重排、自定义属性值里的字符串归一双引号），
-//! 外加 `@extend` 单段扩展者的织入与嵌套属性（`prop: { sub: v }`）。
+//! S3.1 golden comparison: three plain-CSS printing bugs found in real mini-program
+//! corpora (keyframe selector lists on one line, block-comment continuation reindenting,
+//! double-quote normalization of strings in custom property values), plus weaving for
+//! single-part extenders and nested properties (`prop: { sub: v }`).
 //!
-//! 每个目录是一份独立用例：`main.scss` 是入口，`main.css` 是 dart-sass 1.35.2 的
-//! expanded 产物，逐字节断言。
+//! Each directory is one independent case: `main.scss` is the entry and `main.css` is the
+//! dart-sass 1.35.2 expanded output, asserted byte for byte.
 
 use std::path::Path;
 
@@ -26,14 +27,14 @@ fn scss_s31_fixtures_match_dart_sass_byte_for_byte() {
         let path = case.join("main.scss");
         let expected_path = case.join("main.css");
         let expected = std::fs::read_to_string(&expected_path)
-            .unwrap_or_else(|e| panic!("缺少期望产物 {}: {e}", expected_path.display()));
+            .unwrap_or_else(|e| panic!("missing expected output {}: {e}", expected_path.display()));
         let source = std::fs::read_to_string(&path).expect("read scss");
         let out = compile_file(&path, &source, &Options::default())
             .unwrap_or_else(|e| panic!("{}: {e:#}", path.display()));
         assert_eq!(
             out.css,
             expected,
-            "产物与 dart-sass 1.35.2 不一致: {}",
+            "output does not match dart-sass 1.35.2: {}",
             path.display()
         );
         names.push(
@@ -54,13 +55,14 @@ fn scss_s31_fixtures_match_dart_sass_byte_for_byte() {
     ] {
         assert!(
             names.iter().any(|n| n == required),
-            "缺少 fixture {required}: {names:?}"
+            "missing fixture {required}: {names:?}"
         );
     }
-    assert_eq!(checked, 6, "S3.1 fixtures 数量异常: {checked}");
+    assert_eq!(checked, 6, "unexpected number of S3.1 fixtures: {checked}");
 }
 
-/// 缺陷 A 的细节：keyframe 选择器列表恒为单行 `, ` 分隔，普通选择器仍保留源码换行。
+/// Details of bug A: a keyframe selector list is always one line joined with `, `, while
+/// ordinary selectors keep the source line breaks.
 #[test]
 fn keyframe_selector_list_is_single_line_but_selector_list_is_not() {
     let dir = std::env::temp_dir().join("minibuild-scss-s31-keyframe");
@@ -79,10 +81,14 @@ fn keyframe_selector_list_is_single_line_but_selector_list_is_not() {
         css.contains("@keyframes d {\n  0%, 50% {\n    x: 1;\n  }\n}"),
         "{css}"
     );
-    assert!(css.contains(".a,\n.b {"), "普通选择器要保留换行: {css}");
+    assert!(
+        css.contains(".a,\n.b {"),
+        "ordinary selectors must keep their line breaks: {css}"
+    );
 }
 
-/// 嵌套属性块里只允许声明与 `@include`/控制流：其它 at-rule 报 dart 的文案。
+/// A nested property block only allows declarations and `@include`/control flow: any
+/// other at-rule reports dart's message.
 #[test]
 fn nested_property_block_rejects_other_at_rules() {
     let dir = std::env::temp_dir().join("minibuild-scss-s31-nested-at");
@@ -94,11 +100,12 @@ fn nested_property_block_rejects_other_at_rules() {
     )
     .expect("write");
     let source = std::fs::read_to_string(&path).expect("read");
-    let err = compile_file(&path, &source, &Options::default()).expect_err("应当报错");
+    let err = compile_file(&path, &source, &Options::default()).expect_err("should fail");
     assert_eq!(err.message, "This at-rule is not allowed here.");
 }
 
-/// 缺陷 F：空白游程压成「游程的最后一个字符」，续行缩进按字符平移并保留 tab。
+/// Bug F: a whitespace run is collapsed to "the run's last character", and continuation
+/// indentation is shifted per character while tabs are preserved.
 #[test]
 fn custom_property_whitespace_runs_keep_their_last_char() {
     let dir = std::env::temp_dir().join("minibuild-scss-s31-custom-ws");
@@ -113,16 +120,19 @@ fn custom_property_whitespace_runs_keep_their_last_char() {
     let css = compile_file(&path, &source, &Options::default())
         .expect("compile")
         .css;
-    // 游程 `空格 + tab` → 留 tab；`tab + 空格` → 留空格；纯空白/纯 tab 同理。
+    // Run `space + tab` → keep the tab; `tab + space` → keep the space; all-space / all-tab
+    // behave the same way.
     assert!(css.contains("  --a:\t#111;"), "{css:?}");
     assert!(css.contains("  --b: #222;"), "{css:?}");
     assert!(css.contains("  --c: #333;"), "{css:?}");
     assert!(css.contains("  --d:\t#444;"), "{css:?}");
-    // 续行：输出缩进 2 空格 + max(0, 源缩进 2 tab − 声明列 1) = 1 个 tab。
+    // Continuation line: output indent of 2 spaces + max(0, source indent 2 tabs − declaration
+    // column 1) = 1 tab.
     assert!(css.contains("  --e:\n  \t#555;"), "{css:?}");
 }
 
-/// 缺陷 B 的细节：制表符按字符保留（续行 = 输出缩进 + 源缩进 − 注释列）。
+/// Details of bug B: tabs are preserved per character (continuation = output indent +
+/// source indent − comment column).
 #[test]
 fn comment_continuation_keeps_tabs_and_blanks() {
     let dir = std::env::temp_dir().join("minibuild-scss-s31-comment");
@@ -137,8 +147,9 @@ fn comment_continuation_keeps_tabs_and_blanks() {
     let css = compile_file(&path, &source, &Options::default())
         .expect("compile")
         .css;
-    // 2 空格输出缩进 + (源续行 2 tab − 注释列 1) → 保留 1 个 tab。
+    // Indent of 2 spaces on output + (2 tabs on the source continuation − comment column 1)
+    // → 1 tab is kept.
     assert!(css.contains("  /* note\n  \ttransform: none; */"), "{css}");
-    // 空行是真空行，不留缩进空格。
+    // An empty line is a truly empty line, with no indent spaces.
     assert!(css.contains("/* top\n\n  below */"), "{css}");
 }

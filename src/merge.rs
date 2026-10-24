@@ -1,38 +1,45 @@
-//! `@import` 内联后的合并串与段表。
+//! Merged text and segment table after `@import` inlining.
 //!
-//! less 与 scss 都把 `@import` 展开成一段**合并文本**：后续解析、求值、打印只看
-//! 合并串坐标；出错定位与 sourcemap 再经段表回到「哪个文件 + 文件内偏移」。
-//! 本模块只负责这份映射，不关心语法。
+//! Both less and scss expand `@import` into one **merged text**: subsequent parsing,
+//! evaluation, and printing only ever see merged-text coordinates; error locations and
+//! sourcemaps then go back through the segment table to "which file + offset within that
+//! file". This module owns only that mapping and knows nothing about syntax.
 //!
-//! # 坐标契约
+//! # Coordinate contract
 //!
-//! - [`Seg`] 描述合并串 `[start, end)` 来自 `files[file]` 的 `[orig, orig + len)`，
-//!   即 `end - start == 段内覆盖的原文长度`。段表按 `start` 升序、互不重叠；
-//!   [`Merged::normalize`] 会把相邻且同文件连续的段并成一段。
-//! - [`Merged::locate_exact`] 只做**精确**命中：偏移不落在任何段内时返回 `None`，
-//!   越界怎么回退由调用方决定（less 回退到入口文件同偏移，scss 回退到最后一个段）。
-//! - 生成文本（包装 `@media` / `(reference)`、`@use` 合成语句、插值插入）也登记成段，
-//!   映射到一个固定原始偏移，因此段表始终覆盖整段合并文本。
+//! - [`Seg`] says that merged text `[start, end)` comes from `[orig, orig + len)` of
+//!   `files[file]`, i.e. `end - start == the source length covered by the segment`. Segments
+//!   are sorted by `start` ascending and never overlap; [`Merged::normalize`] merges adjacent
+//!   segments that are contiguous within the same file.
+//! - [`Merged::locate_exact`] only does an **exact** match: it returns `None` when the offset
+//!   does not fall inside any segment, and how to fall back on out-of-range offsets is up to
+//!   the caller (less falls back to the same offset in the entry file, scss to the last
+//!   segment).
+//! - Generated text (the `@media` / `(reference)` wrapper, synthesized `@use` statements,
+//!   interpolation insertions) is registered as segments too, mapped to a fixed original
+//!   offset, so the segment table always covers the entire merged text.
 //!
-//! # 为什么 less 有两个文本
+//! # Why less has two texts
 //!
-//! less 在解析前对每个文件做 `split_signed_dimensions` 词法修补（把 `1px+2` 拆成
-//! 独立 token），所以 span 指向修补后的 [`File::text`]；而 sourcemap 的
-//! `sourcesContent` 必须是磁盘原文 [`File::original`]。scss 不做这类改写，两者相同。
+//! Before parsing, less applies a `split_signed_dimensions` lexical fixup to each file
+//! (splitting `1px+2` into separate tokens), so spans point into the patched [`File::text`],
+//! while the sourcemap's `sourcesContent` must be the on-disk original [`File::original`].
+//! scss does no such rewriting, so there the two are identical.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 
 use crate::{CompileError, LineIndex};
 
-/// 参与合并的源文件；下标即 sourcemap `sources` 的序号。
+/// A source file taking part in the merge; the index is its position in the sourcemap
+/// `sources`.
 pub(crate) struct File {
     pub path: PathBuf,
-    /// span 所在坐标（less 已做 `split_signed_dimensions`）。
+    /// The coordinates spans refer to (for less, after `split_signed_dimensions`).
     pub text: String,
-    /// 磁盘原文（`sourcesContent`）；scss 与 [`File::text`] 相同。
+    /// The on-disk original (`sourcesContent`); for scss this equals [`File::text`].
     pub original: String,
-    /// 行表在登记时建一次，供定位复用。
+    /// The line table, built once at registration and reused for location lookups.
     index: LineIndex,
 }
 
@@ -47,7 +54,7 @@ impl File {
     }
 }
 
-/// 合并串的一段：`[start, end)` 来自 `files[file]` 的 `orig` 起。
+/// One segment of the merged text: `[start, end)` starts at `orig` in `files[file]`.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Seg {
     pub start: usize,
@@ -56,7 +63,8 @@ pub(crate) struct Seg {
     pub orig: usize,
 }
 
-/// 一次性拼装的子片（原 less `Expanded` / scss `Piece`）：文本 + 平移前的段表。
+/// A sub-piece assembled in one go (the former less `Expanded` / scss `Piece`): text plus
+/// the segment table before translation.
 #[derive(Default)]
 pub(crate) struct Part {
     pub text: String,
@@ -68,12 +76,12 @@ impl Part {
         Self::default()
     }
 
-    /// 一个文件的完整文本（段覆盖 `[0, len)`）。
+    /// The complete text of one file (the segment covers `[0, len)`).
     pub(crate) fn whole(file: u32, text: String) -> Self {
         Self::source(file, text, 0)
     }
 
-    /// 一个文件内的连续片段，`orig` 是片段在原文里的起点。
+    /// A contiguous slice within one file; `orig` is where the slice starts in the original.
     pub(crate) fn source(file: u32, text: String, orig: usize) -> Self {
         let end = text.len();
         Self {
@@ -87,7 +95,7 @@ impl Part {
         }
     }
 
-    /// 追加整个子片（段整体平移）。
+    /// Append a whole sub-piece (all segments shift as a whole).
     pub(crate) fn append(&mut self, other: &Part) {
         let base = self.text.len();
         self.text.push_str(&other.text);
@@ -98,7 +106,7 @@ impl Part {
         }));
     }
 
-    /// 把 `other[from..to)` 追加进来，被截取的段平移进新坐标。
+    /// Append `other[from..to)`, translating the clipped segments into the new coordinates.
     pub(crate) fn append_range(&mut self, other: &Part, from: usize, to: usize) {
         if from >= to {
             return;
@@ -119,7 +127,8 @@ impl Part {
         }
     }
 
-    /// 用生成的包装文本夹住导入体（`@media` / `(reference)`）：包装部分归到宿主文件。
+    /// Sandwich the imported body with generated wrapper text (`@media` / `(reference)`); the
+    /// wrapper parts are attributed to the host file.
     pub(crate) fn wrap(prefix: &str, body: &Part, suffix: &str, host: u32, at: usize) -> Part {
         let mut part = Self::empty();
         part.push_mapped(prefix, host, at);
@@ -143,13 +152,13 @@ impl Part {
     }
 }
 
-/// 合并文本 + 文件表 + 段表。
+/// Merged text + file table + segment table.
 #[derive(Default)]
 pub(crate) struct Merged {
     pub text: String,
     pub files: Vec<File>,
     pub segs: Vec<Seg>,
-    /// canonical path → 文件 id（[`Merged::add_file`] 去重）。
+    /// canonical path → file id (deduplicated by [`Merged::add_file`]).
     index: HashMap<PathBuf, u32>,
 }
 
@@ -158,7 +167,7 @@ impl Merged {
         Self::default()
     }
 
-    /// 登记源文件；同一路径（canonicalize 后）返回既有 id。
+    /// Register a source file; the same path (after canonicalize) returns the existing id.
     pub(crate) fn add_file(&mut self, path: &Path, text: String, original: String) -> u32 {
         let key = canonical(path);
         if let Some(&id) = self.index.get(&key) {
@@ -176,7 +185,8 @@ impl Merged {
         self.index.get(&key).copied()
     }
 
-    /// 追加一个子片（原 less `push_expanded` / scss `Loader::run` 的拼装）。
+    /// Append one sub-piece (the assembly done by the former less `push_expanded` / scss
+    /// `Loader::run`).
     pub(crate) fn append_part(&mut self, part: Part) {
         let base = self.text.len();
         self.text.push_str(&part.text);
@@ -187,14 +197,15 @@ impl Merged {
         }));
     }
 
-    /// 精确命中：偏移必须落在某个段内。
+    /// Exact match: the offset must fall inside some segment.
     pub(crate) fn locate_exact(&self, at: usize) -> Option<(u32, usize)> {
         let i = self.segs.partition_point(|s| s.start <= at);
         let seg = self.segs.get(i.checked_sub(1)?)?;
         (at < seg.end).then(|| (seg.file, seg.orig + (at - seg.start)))
     }
 
-    /// 合并偏移 → (文件路径, 1-based 行, 0-based 列)；未命中回退到最后一个段。
+    /// Merged offset → (file path, 1-based line, 0-based column); falls back to the last
+    /// segment on a miss.
     pub(crate) fn position(&self, at: usize) -> (String, u32, u32) {
         let (file, orig) = self.locate_or_last(at.min(self.text.len()));
         let entry = &self.files[file as usize];
@@ -204,7 +215,8 @@ impl Merged {
         (entry.path.to_string_lossy().into_owned(), line + 1, column)
     }
 
-    /// 指定文件内的偏移 → (路径, 1-based 行, 0-based 列)；文件不存在时 `None`。
+    /// Offset within a given file → (path, 1-based line, 0-based column); `None` when the file
+    /// does not exist.
     pub(crate) fn position_in(&self, file: u32, orig: usize) -> Option<(String, u32, u32)> {
         let entry = self.files.get(file as usize)?;
         let (line, column) = entry
@@ -223,7 +235,8 @@ impl Merged {
         }
     }
 
-    /// 合并相邻同文件、偏移连续的段（保持分段表最小且便于二分）。
+    /// Merge adjacent segments that are contiguous in the same file (keeps the segment table
+    /// minimal and friendly to binary search).
     pub(crate) fn normalize(&mut self) {
         let mut out: Vec<Seg> = Vec::with_capacity(self.segs.len());
         for seg in self.segs.drain(..) {
@@ -244,7 +257,7 @@ impl Merged {
         self.segs = out;
     }
 
-    /// scss 的越界回退：把偏移钳到最后一个段内。
+    /// scss's out-of-range fallback: clamp the offset into the last segment.
     fn locate_or_last(&self, at: usize) -> (u32, usize) {
         if let Some(found) = self.locate_exact(at) {
             return found;
@@ -308,14 +321,14 @@ mod tests {
                 file,
                 orig: 2,
             },
-            // 同文件但原文不连续：不能合并
+            // Same file but non-contiguous in the original: cannot merge
             Seg {
                 start: 4,
                 end: 6,
                 file,
                 orig: 10,
             },
-            // 空段被丢弃
+            // Empty segments are dropped
             Seg {
                 start: 6,
                 end: 6,

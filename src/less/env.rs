@@ -13,24 +13,24 @@ use super::guard::Val;
 use super::selector::selector_tokens;
 use super::value::{self, Color, PropSource, VarRef, eval};
 
-/// 一层变量表（mixin 闭包与展开注入用）。
+/// One variable table (for mixin closures and expansion injection).
 pub(super) type Vars<'a> = HashMap<String, VarRef<'a>>;
 
-/// mixin 展开时注入的作用域，由外到内：闭包帧、参数帧、体帧。
+/// Scopes injected during mixin expansion, from outer to inner: closure frame, parameter frame, body frame.
 pub(super) type Inject<'a> = Rc<Vec<Vars<'a>>>;
 
-/// 规则集的一段体：detached ruleset 的块，或一条 mixin 定义的块。
+/// One body part of a ruleset: the block of a detached ruleset or of a mixin definition.
 #[derive(Clone)]
 pub(crate) struct RulePart<'a> {
     pub(crate) block: &'a SimpleBlock<'a>,
-    /// 该体的捕获帧（外→内；不含体自身变量帧）
+    /// Captured frames of this body (outer → inner; excluding the body's own variable frame)
     pub(crate) frames: Inject<'a>,
 }
 
-/// detached ruleset（`@dr: {...}`）或作为规则集使用的 mixin 调用结果。
+/// A detached ruleset (`@dr: {...}`) or the result of a mixin call used as a ruleset.
 ///
-/// 同名 mixin 可以有多条定义：less 的 `MixinCall.eval` 把所有命中的体按定义序拼进
-/// 同一个规则集，所以查找是合并查找——后定义优先，后定义缺的项回落到前定义。
+/// A mixin with the same name can have several definitions: less's `MixinCall.eval` concatenates all matching bodies
+/// in definition order into one ruleset, so lookup is a merged lookup — later definitions win, and items missing from a later definition fall back to the earlier one.
 #[derive(Clone)]
 pub(crate) struct RuleSet<'a> {
     pub(crate) parts: Vec<RulePart<'a>>,
@@ -44,7 +44,7 @@ impl<'a> RuleSet<'a> {
     }
 }
 
-/// 查找用的一条声明：声明本身 + 它所在体的作用域（已含体变量帧与属性表）。
+/// One declaration for lookup: the declaration itself + the scope of its body (already including the body variable frame and property table).
 pub(super) struct FlatRule<'a> {
     pub(super) decl: Option<&'a Declaration<'a>>,
     pub(super) var: Option<&'a LessVariableDeclaration<'a>>,
@@ -52,56 +52,56 @@ pub(super) struct FlatRule<'a> {
     pub(super) props: Rc<HashMap<String, Vec<PropSource<'a>>>>,
 }
 
-/// 命名空间查找的一级结果（`@p[key]` 可能是值，也可能是嵌套规则集）。
+/// First-level result of a namespace lookup (`@p[key]` may be a value or a nested ruleset).
 pub(super) enum Lookup<'a> {
     Text(String),
     Ruleset(RuleSet<'a>),
 }
 
-/// 一个 mixin 定义（带括号的定义或单个选择器的规则）。
+/// A mixin definition (a parenthesized definition or a single-selector rule).
 #[derive(Clone)]
 pub(super) struct MixinDef<'a> {
-    /// 绝对选择器 token 路径（含自身），登记时按定义处作用域插值
+    /// Absolute selector token path (including itself), interpolated in the defining scope at registration time
     pub(super) tokens: Vec<String>,
-    /// 自身占用的 token
+    /// Tokens occupied by itself
     pub(super) own: Vec<String>,
-    /// 与 `tokens` 等长：该层能否作为命名空间链路元素被零实参进入
+    /// Same length as `tokens`: whether this level can be entered with zero arguments as a namespace chain element
     pub(super) chain: Vec<bool>,
-    /// 无括号定义没有参数表
+    /// Definitions without parentheses have no parameter list
     pub(super) params: Option<&'a LessMixinParameters<'a>>,
-    /// 定义自身的 guard（`when (...)`）
+    /// The definition's own guard (`when (...)`)
     pub(super) guard: Option<&'a LessConditions<'a>>,
-    /// 命名空间路径上的 guard 及其求值作用域
+    /// Guards along the namespace path together with their evaluation scope
     pub(super) conds: Vec<(&'a LessConditions<'a>, Inject<'a>)>,
     pub(super) block: &'a SimpleBlock<'a>,
-    /// 定义处的变量作用域链（外→内），闭包
+    /// Variable scope chain at the definition site (outer → inner); the closure
     pub(super) closure: Inject<'a>,
 }
 
 #[derive(Clone)]
 pub(super) struct Frame<'a> {
     pub(super) vars: HashMap<String, VarRef<'a>>,
-    /// 本层的属性声明（`$prop` 查找用）
+    /// Property declarations of this level (for `$prop` lookup)
     pub(super) props: HashMap<String, Vec<PropSource<'a>>>,
-    /// 变量声明值末尾的块注释（less 把注释当值节点，引用处带出）
+    /// Block comment at the end of a variable declaration value (less treats comments as value nodes and carries them to the reference site)
     pub(super) suffixes: HashMap<String, String>,
 }
 
 #[derive(Clone)]
 pub(super) struct Env<'a> {
     pub(super) frames: Vec<Frame<'a>>,
-    /// 文件类函数的查找根（入口文件目录 + `paths`），随作用域副本一起传递。
+    /// Lookup roots for file functions (entry file directory + `paths`), propagated with scope copies.
     pub(super) roots: Option<Rc<Roots>>,
-    /// 求值期未命中的查找（less 在同样输入上抛错，这里收集起来统一报错）。
+    /// Lookups that missed during evaluation (less throws on the same input; they are collected here and reported together).
     pub(super) misses: Rc<RefCell<Vec<(String, Span)>>>,
-    /// 源码里有 `@plugin` 时关闭未定义变量报错：插件可在求值期注入变量。
+    /// Disables undefined-variable errors when the source has `@plugin`: plugins can inject variables during evaluation.
     pub(super) plugins: bool,
 }
 
-/// `data-uri` / `image-size` 的相对路径基准。
+/// Relative path base for `data-uri` / `image-size`.
 ///
-/// less 用 `currentFileInfo.entryPath`（rewriteUrls 关闭时）——即**入口文件**所在目录，
-/// 而不是当前被内联的文件；`@import` 已经按文本内联，这份目录信息只能从这里带进求值层。
+/// less uses `currentFileInfo.entryPath` (when rewriteUrls is off) — that is the directory of **the entry file**,
+/// not the file currently being inlined; `@import` is already inlined as text, so this directory information can only be carried into the evaluation layer from here.
 pub(super) struct Roots {
     pub(super) dir: PathBuf,
     pub(super) paths: Vec<PathBuf>,
@@ -130,7 +130,7 @@ impl<'a> Env<'a> {
     pub(super) fn pop(&mut self) {
         self.frames.pop();
     }
-    /// 压入 mixin 展开的注入作用域（闭包 + 参数 + 体变量）。
+    /// Pushes the injection scopes of a mixin expansion (closure + parameters + body variables).
     pub(super) fn push_scope(&mut self, inject: &Option<Inject<'a>>) {
         if let Some(frames) = inject {
             self.frames.extend(frames.iter().map(|vars| Frame {
@@ -145,7 +145,7 @@ impl<'a> Env<'a> {
             self.frames.truncate(self.frames.len() - frames.len());
         }
     }
-    /// 同上，并记下值末尾的块注释（引用处带出）。
+    /// Same as above, additionally recording the block comment at the end of the value (carried to the reference site).
     pub(super) fn set_var(
         &mut self,
         name: String,
@@ -159,13 +159,13 @@ impl<'a> Env<'a> {
             }
         }
     }
-    /// 写入已求值的文本变量（mixin 体变量外泄到调用块用）。
+    /// Writes an already evaluated text variable (for mixin body variables leaking into the calling block).
     pub(super) fn set_text(&mut self, name: String, value: String) {
         if let Some(f) = self.frames.last_mut() {
             f.vars.insert(name, VarRef::Text(value));
         }
     }
-    /// 叠加注入帧后的作用域副本（在规则集体的作用域里求值）。
+    /// Scope copy with the injection frames layered on (evaluated in the ruleset body's scope).
     pub(super) fn scoped(&self, extra: &Inject<'a>) -> Env<'a> {
         let mut frames = self.frames.clone();
         frames.extend(extra.iter().map(|vars| Frame {
@@ -180,7 +180,7 @@ impl<'a> Env<'a> {
             plugins: self.plugins,
         }
     }
-    /// 叠加一层属性表后的作用域副本（detached ruleset 体里 `$prop` 查同块声明）。
+    /// Scope copy with an extra property table layered on (for `$prop` in a detached ruleset body looking up declarations in the same block).
     pub(super) fn with_props(&self, props: HashMap<String, Vec<PropSource<'a>>>) -> Env<'a> {
         let mut frames = self.frames.clone();
         frames.push(Frame {
@@ -195,13 +195,13 @@ impl<'a> Env<'a> {
             plugins: self.plugins,
         }
     }
-    /// 未命中的变量引用：less 报 NameError，调用方据此统一报错（`@plugin` 存在时除外）。
+    /// Unresolved variable reference: less reports a NameError and the caller reports it uniformly (except when `@plugin` is present).
     pub(super) fn report_var_miss(&self, name: &str, span: Span) {
         if !self.plugins {
             self.miss(format!("variable @{name} is undefined"), span);
         }
     }
-    /// 记录一次求值期语义错误（未命中的变量/属性查找）。
+    /// Records one semantic error during evaluation (a missed variable/property lookup).
     pub(super) fn miss(&self, message: String, span: Span) {
         self.misses.borrow_mut().push((message, span));
     }
@@ -228,7 +228,7 @@ impl<'a> Env<'a> {
             .rev()
             .find_map(|f| f.suffixes.get(name).cloned())
     }
-    /// 当前可见变量帧的快照（外→内）。
+    /// Snapshot of the currently visible variable frames (outer → inner).
     pub(super) fn snapshot(&self) -> Vec<Vars<'a>> {
         self.frames.iter().map(|f| f.vars.clone()).collect()
     }
@@ -257,7 +257,7 @@ impl<'a> value::Scope<'a> for Env<'a> {
     }
 }
 
-/// 体变量：只含体顶层声明（lazy，后定义覆盖），供展开时的注入帧使用。
+/// Body variables: only top-level declarations of the body (lazy, later definitions override), used for the injection frame during expansion.
 pub(super) fn body_vars<'a>(block: &'a SimpleBlock<'a>) -> Vars<'a> {
     let mut vars = Vars::new();
     for st in &block.statements {
@@ -268,7 +268,7 @@ pub(super) fn body_vars<'a>(block: &'a SimpleBlock<'a>) -> Vars<'a> {
     vars
 }
 
-/// 帧栈直接当作用域用（避免为每次查找克隆整栈）。
+/// Uses the frame stack directly as a scope (avoiding a full-stack clone on every lookup).
 pub(super) struct Frames<'a, 'b>(pub(super) &'b [Vars<'a>]);
 
 impl<'a> value::Scope<'a> for Frames<'a, '_> {
@@ -281,7 +281,7 @@ impl<'a> value::Scope<'a> for Frames<'a, '_> {
     }
 }
 
-/// mixin 定义表：按自身名（末 token）分桶，避免每次调用都全表扫描。
+/// Mixin definition table: bucketed by own name (last token) to avoid a full scan on every call.
 #[derive(Default)]
 pub(super) struct Defs<'a> {
     pub(super) list: Vec<MixinDef<'a>>,
@@ -289,13 +289,13 @@ pub(super) struct Defs<'a> {
 }
 
 impl<'a> Defs<'a> {
-    /// 登记一条定义；同一 (体, token 链) 重复时保留先登记的（闭包等价）。
+    /// Registers a definition; when the same (body, token chain) repeats, the first registration is kept (the closure is equivalent).
     pub(super) fn insert(&mut self, def: MixinDef<'a>) {
         let bucket = self
             .index
             .entry(def.tokens.last().cloned().unwrap_or_default())
             .or_default();
-        // 同一 (体, token 链) 重复登记时只刷新闭包：动态注册的定义随每次展开更新
+        // Re-registering the same (body, token chain) only refreshes the closure: dynamically registered definitions update on every expansion
         if let Some(&i) = bucket.iter().find(|&&i| {
             std::ptr::eq(self.list[i].block, def.block) && self.list[i].tokens == def.tokens
         }) {
@@ -311,33 +311,33 @@ impl<'a> Defs<'a> {
     }
 }
 
-/// 调用实参（值已求值）。
+/// A call argument (value already evaluated).
 pub(super) struct CallArg<'a> {
     pub(super) name: Option<String>,
     pub(super) text: String,
-    /// 空格分隔的值列表在该实参里的元素（`length(@arguments)` 依赖它）
+    /// Elements of a space-separated value list in this argument (`length(@arguments)` relies on it)
     pub(super) items: Vec<String>,
     pub(super) val: Val,
-    /// 颜色实参的浮点通道（mixin 形参绑定时保留，避免 `#rrggbb` 往返丢精度）
+    /// Floating-point channels of a color argument (preserved when binding mixin parameters to avoid precision loss in `#rrggbb` round trips)
     pub(super) color: Option<Color>,
-    /// 实参是规则集（detached ruleset / 无参 mixin 调用）时带出的体
+    /// The body carried when the argument is a ruleset (detached ruleset / argument-less mixin call)
     pub(super) ruleset: Option<Rc<RuleSet<'a>>>,
-    /// 未计算的除法（math=parens-division 下保留为 Operation）：形参绑成 AST，
-    /// 这样 `(@b)` 括号内能算出来、括号外仍原样输出
+    /// Unevaluated division (kept as an Operation under math=parens-division): the parameter is bound to the AST,
+    /// so it is evaluated inside `(@b)` and still emitted verbatim outside parentheses
     pub(super) division: Option<&'a ComponentValue<'a>>,
 }
 
-/// 候选定义 + 已绑定的形参（guard 结果决定是否展开）。
+/// Candidate definition + bound parameters (the guard result decides whether it expands).
 pub(super) struct Candidate<'a> {
     pub(super) def: MixinDef<'a>,
-    /// `default()` 两趟求值得到的分组
+    /// The group obtained from the two-pass `default()` evaluation
     pub(super) group: u8,
     pub(super) frame: Vars<'a>,
     pub(super) arguments: Vec<String>,
 }
 
 impl<'a> Compiler<'a> {
-    /// 值节点 → 规则集（detached ruleset / 无参 mixin 调用 / 变量 / 嵌套查找）。
+    /// Value node → ruleset (detached ruleset / argument-less mixin call / variable / nested lookup).
     pub(super) fn ruleset_of(
         &self,
         node: &'a ComponentValue<'a>,
@@ -361,7 +361,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// 块级规则集：捕获当前作用域（detached ruleset 的环境就是求值到它的那一刻）。
+    /// Block-level ruleset: captures the current scope (a detached ruleset's environment is the one at the moment it is evaluated).
     pub(super) fn ruleset_block(&self, block: &'a SimpleBlock<'a>) -> RuleSet<'a> {
         RuleSet::single(block, Rc::new(self.env.snapshot()))
     }
@@ -374,9 +374,9 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// 无参 mixin 调用 → 其体对应的规则集（`each(.set(), …)` / `@p: .mk-map()` / `#ns[prop]`）。
+    /// Argument-less mixin call → the ruleset for its body (`each(.set(), …)` / `@p: .mk-map()` / `#ns[prop]`).
     ///
-    /// 全部命中定义按定义序合并（less `MixinCall.eval` 拼接所有候选的规则）。
+    /// All matching definitions are merged in definition order (less `MixinCall.eval` concatenates the rules of every candidate).
     pub(super) fn mixin_ruleset(&self, call: &'a LessMixinCall<'a>) -> Option<RuleSet<'a>> {
         let tokens: Vec<String> = callee_raw_tokens(call, self.src)
             .iter()
@@ -387,7 +387,7 @@ impl<'a> Compiler<'a> {
             .call_defs(&tokens, &args)
             .into_iter()
             .map(|def| {
-                // 实参按位置/名字绑到形参：体内的 `@param` 引用才能在查找时求值
+                // Bind arguments to parameters by position/name so `@param` references in the body can be evaluated during lookup
                 let (frame, arguments, _) = self.bind_call_args(&def, &args);
                 RulePart {
                     block: def.block,
@@ -398,7 +398,7 @@ impl<'a> Compiler<'a> {
         (!parts.is_empty()).then_some(RuleSet { parts })
     }
 
-    /// 调用命中的定义：最内层帧的全部候选（过实参与 guard 筛选），保持定义序。
+    /// Definitions matched by a call: all candidates at the innermost frame (filtered by arguments and guard), in definition order.
     pub(super) fn call_defs(&self, tokens: &[String], args: &[CallArg<'a>]) -> Vec<MixinDef<'a>> {
         let defs = self.find_mixins(tokens);
         let Some(split) = defs.iter().map(|(_, split)| *split).max() else {
@@ -411,7 +411,7 @@ impl<'a> Compiler<'a> {
             .collect()
     }
 
-    /// 实参按位置/名绑到形参（命名空间查找只需文本与 guard 值）。
+    /// Binds arguments to parameters by position/name (namespace lookup only needs text and guard values).
     pub(super) fn bind_call_args(
         &self,
         def: &MixinDef<'a>,
@@ -443,14 +443,14 @@ impl<'a> Compiler<'a> {
         (frame, arguments, vals)
     }
 
-    /// 一段体的求值作用域：捕获帧 + 体变量帧（体变量后声明胜出）。
+    /// Evaluation scope of one body part: captured frames + body variable frame (later body variable declarations win).
     pub(super) fn part_scope(&self, part: &RulePart<'a>) -> Inject<'a> {
         let mut frames = (*part.frames).clone();
         frames.push(body_vars(part.block));
         Rc::new(frames)
     }
 
-    /// 一段体的完整求值环境：作用域帧 + 本层属性表（`$prop` 查同块声明）。
+    /// Full evaluation environment of one body part: scope frames + this level's property table (`$prop` looks up declarations in the same block).
     pub(super) fn rule_env(&self, rule: &FlatRule<'a>) -> Env<'a> {
         let mut env = self.env.scoped(&rule.scope);
         if let Some(frame) = env.frames.last_mut() {
@@ -459,7 +459,7 @@ impl<'a> Compiler<'a> {
         env
     }
 
-    /// 一层块自身的属性表（`$prop` / `[]` 查找用）。
+    /// Property table of a block level (for `$prop` / `[]` lookup).
     pub(super) fn block_props(
         &self,
         block: &'a SimpleBlock<'a>,
@@ -487,8 +487,8 @@ impl<'a> Compiler<'a> {
             .collect()
     }
 
-    /// 查找用的规则序列：嵌套的 mixin / detached ruleset 调用就地展开
-    /// （less 在 `Ruleset.eval` 时已把 mixin 产物拼接进规则数组）。
+    /// Rule sequence for lookup: nested mixin / detached ruleset calls are expanded in place
+    /// (less already concatenates mixin output into the rule array during `Ruleset.eval`).
     pub(super) fn flat_rules(&self, rs: &RuleSet<'a>, depth: usize) -> Vec<FlatRule<'a>> {
         let mut out = Vec::new();
         if depth > 8 {
@@ -536,8 +536,8 @@ impl<'a> Compiler<'a> {
         self.namespace_lookup_checked(ns, depth).ok()
     }
 
-    /// 命名空间查找（带错误消息）：未命中的变量/属性在 less 里是 NameError，
-    /// 这里把消息带回调用方（以前一律当成空值静默输出）。
+    /// Namespace lookup (with error messages): missed variables/properties are a NameError in less,
+    /// and the message is returned to the caller here (previously they were silently treated as empty values).
     pub(super) fn namespace_lookup_checked(
         &self,
         ns: &'a LessNamespaceValue<'a>,
@@ -576,7 +576,7 @@ impl<'a> Compiler<'a> {
         Ok(cur)
     }
 
-    /// `@p[text]` / `#ns[prop]` 的一级查找（对齐 less `NamespaceValue.eval`）。
+    /// First-level lookup for `@p[text]` / `#ns[prop]` (following less `NamespaceValue.eval`).
     pub(super) fn lookup_in(
         &self,
         rs: &RuleSet<'a>,
@@ -584,7 +584,7 @@ impl<'a> Compiler<'a> {
         depth: usize,
     ) -> Result<Lookup<'a>, String> {
         let name = match &lookup.name {
-            // 空 lookup（`@p[]`）取最后一条声明的值
+            // An empty lookup (`@p[]`) takes the value of the last declaration
             None => {
                 return self
                     .ruleset_last_decl(rs, depth)
@@ -638,7 +638,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// 变量声明值 → 规则集；detached ruleset 体用声明所在体的作用域（而不是调用处）。
+    /// Variable declaration value → ruleset; a detached ruleset body uses the scope of the declaring body (not the call site).
     pub(super) fn ruleset_at(
         &self,
         node: &'a ComponentValue<'a>,
@@ -674,8 +674,8 @@ impl<'a> Compiler<'a> {
         )))
     }
 
-    /// less `Ruleset.lastDeclaration`：最后一条声明（变量声明也算，`@r: 20px` 就是
-    /// 一条 variable 声明），`[]` 空查找取它的值。
+    /// less `Ruleset.lastDeclaration`: the last declaration (variable declarations count too — `@r: 20px` is
+    /// a variable declaration); an empty `[]` lookup takes its value.
     pub(super) fn ruleset_last_decl(&self, rs: &RuleSet<'a>, depth: usize) -> Option<String> {
         let rules = self.flat_rules(rs, depth + 1);
         let rule = rules.last()?;
@@ -687,7 +687,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// 命名空间查找的最终文本（规则集结果按 less 取最后一条声明）。
+    /// Final text of a namespace lookup (a ruleset result takes the last declaration as less does).
     pub(super) fn namespace_text(
         &self,
         ns: &'a LessNamespaceValue<'a>,

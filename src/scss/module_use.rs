@@ -1,12 +1,13 @@
-//! 模块系统：`@use` / `@forward`、命名空间与成员过滤、冲突检查。
+//! Module system: `@use` / `@forward`, namespaces and member filtering, conflict
+//! checks.
 //!
-//! 由 `scss/mod.rs` 拆分而来（纯搬运）。
+//! Split out of `scss/mod.rs` (pure code move).
 
 use super::*;
 
 impl<'a> Converter<'a> {
-    /// `@use`：注册命名空间（`as` / `as *`），`with` 配置交给目标模块。
-    /// 语句本身不产出 CSS。
+    /// `@use`: registers a namespace (`as` / `as *`); the `with` configuration goes
+    /// to the target module. The statement itself emits no CSS.
     pub(super) fn use_rule(
         &mut self,
         at: &oxc_css_parser::ast::AtRule<'a>,
@@ -15,11 +16,16 @@ impl<'a> Converter<'a> {
         let url = spec.path.as_str();
         let file = self.file_at(at.span.start);
         let alias = spec.alias.map(|(text, _)| text).unwrap_or("");
-        // `@use ... show/hide` 还没实现：显式报错，避免把过滤掉的成员静默暴露出去。
+        // `@use ... show/hide` is not implemented yet: error out explicitly so the
+        // filtered members are not silently exposed.
         if spec.filter.is_some() {
-            return Err(self.err(at.span.start, "SCSS 特性尚未实现（S4）: @use ... show/hide"));
+            return Err(self.err(
+                at.span.start,
+                "SCSS feature not implemented yet (S4): @use ... show/hide",
+            ));
         }
-        // 内置模块：**不参与文件解析**，直接得到一个静态成员表。
+        // Built-in modules: **not resolved from files**, they directly provide a
+        // static member table.
         if let Some(module) = modules::Builtin::from_url(url) {
             if spec.config.is_some() {
                 return Err(self.err(at.span.start, "Built-in modules can't be configured."));
@@ -62,8 +68,9 @@ impl<'a> Converter<'a> {
             }
         }
         if alias == "*" {
-            // 只并入本文件的作用域：不写进模块的对外成员表，否则下游
-            // `@use this as *` 会读到并不属于本模块的成员。
+            // Merge into this file's scope only: not into the module's exported
+            // member table, otherwise a downstream `@use this as *` would see
+            // members that don't belong to this module.
             self.eval.import_star_module(module.scope);
             return Ok(());
         }
@@ -77,8 +84,10 @@ impl<'a> Converter<'a> {
             .map_err(|e| self.eval_err(e))
     }
 
-    /// `@forward`：把目标模块的成员导出给下游（惰性解析，本模块内不可见）。
-    /// `with` 的配置在目标模块求值前登记；`!default` 表示调用方可以覆盖。
+    /// `@forward`: exports the target module's members to downstream code (lazy
+    /// resolution, not visible inside this module).
+    /// The `with` configuration is registered before the target module is
+    /// evaluated; `!default` means the caller may override it.
     pub(super) fn forward_rule(
         &mut self,
         at: &oxc_css_parser::ast::AtRule<'a>,
@@ -87,7 +96,7 @@ impl<'a> Converter<'a> {
         if spec.path.starts_with("sass:") {
             return Err(self.err(
                 at.span.start,
-                "SCSS 特性尚未实现（S4）: @forward \"sass:*\"",
+                "SCSS feature not implemented yet (S4): @forward \"sass:*\"",
             ));
         }
         let module = self.loaded_module(at, &spec.path)?;
@@ -95,7 +104,8 @@ impl<'a> Converter<'a> {
             .alias
             .map(|(text, _)| text.strip_suffix('*').unwrap_or("").to_string())
             .unwrap_or_default();
-        // `show` / `hide` 名单在 `as p-*` 下写的是**加前缀之后**的名字（dart 实测）。
+        // Under `as p-*` the `show` / `hide` lists name members **after** the prefix
+        // is applied (observed with dart).
         let (show, hide) = spec.filter.as_ref().map(member_filter).unwrap_or_default();
         let edge = eval::ForwardEdge {
             scope: module.scope,
@@ -105,7 +115,8 @@ impl<'a> Converter<'a> {
             hide,
         };
 
-        // 先应用本语句自己的 `with`（`!default` 是转发默认值，调用方可覆盖）。
+        // Apply this statement's own `with` first (`!default` is the forwarded
+        // default, which the caller may override).
         if let Some(config) = &spec.config {
             for entry in
                 imports::config_entries(config).map_err(|(at, message)| self.err(at, message))?
@@ -126,9 +137,11 @@ impl<'a> Converter<'a> {
             }
         }
 
-        // 下游对本模块的配置沿转发边下传（配置本体仍留在本模块：目标模块不声明这个
-        // 变量时，本模块后面的 `!default` 声明照样消费它——dart 的 `Configuration`
-        // 是共享对象，谁先消费谁生效）。
+        // Downstream configurations of this module are passed down along forward
+        // edges (the configuration itself stays in this module: when the target
+        // module does not declare the variable, a later `!default` declaration here
+        // still consumes it -- dart's `Configuration` is a shared object, whoever
+        // consumes first wins).
         let scope = self.eval.active_scope();
         for mut entry in self.eval.pending_configs(scope) {
             if self.eval.config_used(entry.id) {
@@ -148,8 +161,9 @@ impl<'a> Converter<'a> {
                 ));
             }
         }
-        // `@import` 内联进来的文件没有自己的作用域：它 `@forward` 的成员在导入处
-        // 也必须是可见的（dart 实测变量 / 函数 / mixin 都可见）。
+        // A file inlined by `@import` has no scope of its own: the members it
+        // forwards must also be visible at the import site (observed with dart for
+        // variables, functions and mixins).
         let file = self.file_at(at.span.start);
         if self.module_file.get(&scope).copied().unwrap_or(0) != file {
             self.eval.import_star_module(module.scope);
@@ -158,8 +172,9 @@ impl<'a> Converter<'a> {
         Ok(())
     }
 
-    /// 两个不同的模块被转发到同一作用域且定义了同名成员时报错（dart 实测；
-    /// 同一模块经菱形转发出现两次不算冲突）。
+    /// Error when two different modules are forwarded into the same scope and define
+    /// a member with the same name (observed with dart; the same module appearing
+    /// twice through a diamond forward is not a conflict).
     pub(super) fn check_forward_conflicts(&self) -> Option<Box<CompileError>> {
         for scope in 0..self.eval.scope_count() {
             let mut vars: HashMap<String, (usize, String)> = HashMap::new();
@@ -244,20 +259,22 @@ impl<'a> Converter<'a> {
         None
     }
 
-    /// 语句自己的 `@use` / `@forward` prelude。
+    /// The statement's own `@use` / `@forward` prelude.
     fn module_spec(
         &self,
         at: &oxc_css_parser::ast::AtRule<'a>,
     ) -> Result<imports::ModuleSpec<'a>, Box<CompileError>> {
         let src = self.src();
-        // oxc 的 at-rule span 会截断 prelude，语句尾自己扫到顶层 `;`。
+        // oxc's at-rule span truncates the prelude, so scan to the top-level `;`
+        // ourselves at the end of the statement.
         let end = imports::statement_end(src, at.span.end);
         let text = src.get(at.span.start..end).unwrap_or_default();
         imports::parse_module_spec(text, at.span.start)
             .map_err(|(at, message)| self.err(at, message))
     }
 
-    /// `@use` / `@forward` 的 URL → 已装配的模块（装配层已递归载入并记好作用域）。
+    /// `@use` / `@forward` URL -> the assembled module (the assembly layer has
+    /// already loaded it recursively and recorded its scope).
     fn loaded_module(
         &self,
         at: &oxc_css_parser::ast::AtRule<'a>,
@@ -283,8 +300,9 @@ impl<'a> Converter<'a> {
     }
 }
 
-/// `@use` 默认命名空间：文件名去掉前导 `_` 与扩展名。
-/// `@forward` 的 show/hide 名单 → 求值器的过滤器（名字归一化）。
+/// Default namespace for `@use`: the file name without the leading `_` and
+/// without the extension.
+/// `@forward` show/hide lists -> the evaluator's filter (names normalized).
 fn member_filter(filter: &imports::Filter<'_>) -> (Option<eval::MemberFilter>, eval::MemberFilter) {
     let list = eval::MemberFilter {
         vars: filter

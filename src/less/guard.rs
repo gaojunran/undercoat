@@ -1,10 +1,10 @@
-//! less guard 求值：`when (...)` 条件树、值比较与 `default()`。
+//! less guard evaluation: `when (...)` condition trees, value comparison, and `default()`.
 //!
-//! 比较规则逐条对齐 less@4.1.3 的 `Node.compare`：
-//! - 有 `compare` 的节点（Dimension / Color / Quoted / Anonymous）先行比较，
-//!   但右值是 Quoted / Anonymous 时反过来用右值的 `compare`（"对称结果"用 toCSS）。
-//! - Quoted 双方都带引号时只比较内容（引号差异忽略）；`~"..."` 参与时退化为 toCSS 比较。
-//! - Dimension 一方无单位时直接比值；都有单位则先归一到 px/s/rad，单位不同视为不可比。
+//! Comparison rules follow less@4.1.3's `Node.compare` one by one:
+//! - Nodes with `compare` (Dimension / Color / Quoted / Anonymous) are compared first,
+//!   but when the right side is Quoted / Anonymous, the right side's `compare` is used instead (the "symmetric result" uses toCSS).
+//! - When both Quoted sides have quotes, only the content is compared (quote differences are ignored); when `~"..."` is involved, comparison degrades to toCSS.
+//! - A Dimension with one side unitless is compared by value directly; with units on both sides both are first normalized to px/s/rad, and different units are treated as incomparable.
 
 use std::collections::HashMap;
 
@@ -12,22 +12,22 @@ use oxc_css_parser::ast::*;
 
 use super::value::{self, Color, Scope, VarRef};
 
-/// guard 里参与比较的值。
+/// A value taking part in comparison inside a guard.
 #[derive(Clone, Debug)]
 pub(crate) enum Val {
-    /// Dimension / Percentage：`4px`、`50%`、`3`
+    /// Dimension / Percentage: `4px`, `50%`, `3`
     Num(f64, Option<String>),
-    /// 颜色：原色值与原始写法（命名色 `white` 保留文本以便 toCSS 比较）
+    /// Color: the color value and its original spelling (a named color like `white` keeps its text for toCSS comparison)
     Color(Color, Option<String>),
     Quoted {
         text: String,
-        /// `~"..."` 这类无引号字符串
+        /// An unquoted string such as `~"..."`
         escaped: bool,
         quote: char,
     },
     Keyword(String),
     Anonymous(String),
-    /// 空格或逗号分隔的列表（less 的 Expression / Value）
+    /// A space- or comma-separated list (less's Expression / Value)
     List(Vec<Val>, bool),
     Url(String),
     Other(String),
@@ -64,7 +64,7 @@ fn is_quoted_like(v: &Val) -> bool {
     matches!(v, Val::Quoted { .. } | Val::Anonymous(_))
 }
 
-/// 值的 CSS 文本（Quoted 按 escaped 决定是否带引号）。
+/// CSS text of a value (Quoted follows escaped to decide whether to add quotes).
 pub(crate) fn to_css(v: &Val) -> String {
     match v {
         Val::Num(n, u) => match u {
@@ -104,7 +104,7 @@ fn num_cmp(a: f64, b: f64) -> Option<i32> {
     }
 }
 
-/// 单位归一（less `Dimension.unify` → px / s / rad）。
+/// Unit normalization (less `Dimension.unify` → px / s / rad).
 fn unified(v: f64, unit: &str) -> (String, f64) {
     const CANONICAL: [&str; 3] = ["px", "s", "rad"];
     match (value::unit_factor(unit), value::unit_factor(CANONICAL[0])) {
@@ -117,7 +117,7 @@ fn unified(v: f64, unit: &str) -> (String, f64) {
     }
 }
 
-/// less `Node.compare`：`-1/0/1` 为可比值，`None` 为"不可比"（比较结果一律 false）。
+/// less `Node.compare`: `-1/0/1` are comparable results, `None` means "incomparable" (every comparison then yields false).
 pub(crate) fn cmp(a: &Val, b: &Val) -> Option<i32> {
     if has_compare(a) && !is_quoted_like(b) {
         return compare_node(a, b);
@@ -158,7 +158,7 @@ fn compare_node(a: &Val, b: &Val) -> Option<i32> {
                 escaped: bescaped,
                 ..
             } if !escaped && !bescaped => {
-                // 都带引号：忽略引号差异，只比较内容
+                // Both quoted: ignore quote differences and compare content only
                 Some(if text == btext {
                     0
                 } else if text.as_str() < btext.as_str() {
@@ -174,7 +174,7 @@ fn compare_node(a: &Val, b: &Val) -> Option<i32> {
     }
 }
 
-/// 同类型节点的值比较（less `Node.compare` 的数组/标量分支）。
+/// Value comparison of same-type nodes (the array/scalar branches of less `Node.compare`).
 fn deep_cmp(a: &Val, b: &Val) -> Option<i32> {
     match (a, b) {
         (Val::List(x, _), Val::List(y, _)) => {
@@ -190,7 +190,7 @@ fn deep_cmp(a: &Val, b: &Val) -> Option<i32> {
     }
 }
 
-/// 纯文本值的形状推定（globalVars / mixin 外泄变量只有文本）。
+/// Shape inference for plain-text values (globalVars / variables leaked from a mixin only have text).
 pub(crate) fn from_text(text: &str) -> Val {
     let t = text.trim();
     for q in ['"', '\''] {
@@ -222,12 +222,12 @@ fn text_of<'a>(cv: &ComponentValue, src: &'a str) -> &'a str {
     }
 }
 
-/// 一次 guard 求值的上下文。
+/// Context of one guard evaluation.
 pub(crate) struct Ctx<'a, 'b> {
     pub(crate) src: &'a str,
     pub(crate) scope: &'b dyn Scope<'a>,
     pub(crate) params: &'b HashMap<String, Val>,
-    /// `default()` 在本轮取值（less 的两趟求值）
+    /// The `default()` value in this round (less's two-pass evaluation)
     pub(crate) default: bool,
 }
 
@@ -235,7 +235,7 @@ pub(crate) fn eval_conditions<'a>(conds: &LessConditions<'a>, ctx: &Ctx<'a, '_>)
     conds.conditions.iter().any(|c| eval_condition(c, ctx, 0))
 }
 
-/// 单个条件求值（`boolean()` / `if()` 的实参）。
+/// Evaluates a single condition (the argument of `boolean()` / `if()`).
 pub(crate) fn eval_single<'a>(cond: &LessCondition<'a>, ctx: &Ctx<'a, '_>) -> bool {
     eval_condition(cond, ctx, 0)
 }
@@ -260,7 +260,7 @@ fn eval_condition<'a>(cv: &LessCondition<'a>, ctx: &Ctx<'a, '_>, depth: usize) -
         },
         LessCondition::Negated(n) => !eval_condition(&n.condition, ctx, depth + 1),
         LessCondition::Parenthesized(p) => eval_condition(&p.condition, ctx, depth + 1),
-        // 裸值条件：less 把 `when (@a)` 当作 `@a = true`
+        // Bare value condition: less treats `when (@a)` as `@a = true`
         LessCondition::Value(v) => compare_op(
             &LessBinaryConditionOperatorKind::Equal,
             &val_of(v, ctx, depth + 1),
@@ -280,7 +280,7 @@ fn cond_val<'a>(c: &LessCondition<'a>, ctx: &Ctx<'a, '_>, depth: usize) -> Val {
 
 fn compare_op(op: &LessBinaryConditionOperatorKind, a: &Val, b: &Val) -> bool {
     use LessBinaryConditionOperatorKind::*;
-    // less 的 `Condition.eval` 只认 `> >= < <= = =<`；`=>` 解析得出但永不匹配。
+    // less's `Condition.eval` only recognizes `> >= < <= = =<`; `=>` parses but never matches.
     match cmp(a, b) {
         Some(-1) => matches!(op, LessThan | LessThanOrEqual | EqualOrLessThan),
         Some(0) => matches!(
@@ -292,7 +292,7 @@ fn compare_op(op: &LessBinaryConditionOperatorKind, a: &Val, b: &Val) -> bool {
     }
 }
 
-/// `ComponentValue` → 可比较的值。
+/// `ComponentValue` → comparable value.
 pub(crate) fn val_of<'a>(cv: &ComponentValue<'a>, ctx: &Ctx<'a, '_>, depth: usize) -> Val {
     if depth > 16 {
         return Val::Other(text_of(cv, ctx.src).to_string());
@@ -331,7 +331,7 @@ pub(crate) fn val_of<'a>(cv: &ComponentValue<'a>, ctx: &Ctx<'a, '_>, depth: usiz
         }
         ComponentValue::InterpolableIdent(InterpolableIdent::Literal(i)) => {
             let raw = i.raw.trim_end();
-            // less 把颜色关键字解析成 Color 节点（`white = #fff` 成立）
+            // less parses color keywords into Color nodes (so `white = #fff` holds)
             match value::parse_color(raw) {
                 Some(c) => Val::Color(c, Some(raw.to_string())),
                 None => Val::Keyword(raw.to_string()),
@@ -363,7 +363,7 @@ pub(crate) fn val_of<'a>(cv: &ComponentValue<'a>, ctx: &Ctx<'a, '_>, depth: usiz
             escaped: true,
             quote: '"',
         },
-        // 运算：guard 里的括号运算要算出结果（`when (8 + (5 - 1) < 13)`）
+        // Operation: parenthesized operations in a guard must be evaluated (`when (8 + (5 - 1) < 13)`)
         ComponentValue::LessBinaryOperation(_) | ComponentValue::LessParenthesizedOperation(_) => {
             from_text(&value::eval(cv, ctx.src, ctx.scope, depth + 1))
         }
@@ -413,7 +413,7 @@ fn function_val<'a>(f: &Function<'a>, ctx: &Ctx<'a, '_>, depth: usize) -> Val {
         FunctionName::Ident(InterpolableIdent::Literal(i)) => i.name.to_string(),
         _ => String::new(),
     };
-    // 探针函数不求值实参（less 的 evalArgs=false）
+    // Probe functions do not evaluate their arguments (less's evalArgs=false)
     match name.as_str() {
         "isdefined" => {
             return Val::keyword(
@@ -440,7 +440,7 @@ fn function_val<'a>(f: &Function<'a>, ctx: &Ctx<'a, '_>, depth: usize) -> Val {
     let first = || args.first().cloned().unwrap_or(Val::Other(String::new()));
     match name.as_str() {
         "default" => Val::keyword(ctx.default),
-        // `e("...")` 在 less 里是 Anonymous：它参与比较时只比 toCSS
+        // `e("...")` is Anonymous in less: when compared it only compares toCSS
         "e" => Val::Anonymous(
             args.first()
                 .map(|a| to_css(a).trim_matches(['"', '\'']).to_string())

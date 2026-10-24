@@ -20,7 +20,7 @@ use super::{Child, Compiler, Head, Layer, strip_embedded_important};
 use crate::doc::{AtRule as OutAtRule, Body, Comment, Decl, DeclItem, Item, Keyframe, Raw};
 use crate::{CompileError, Options};
 
-/// 一条可输出声明：带 mixin 注入作用域与 `!important` 强制位。
+/// An emittable declaration: carries the mixin injection scope and the forced `!important` flag.
 #[derive(Clone)]
 pub(super) struct Emit<'a> {
     pub(super) decl: &'a Declaration<'a>,
@@ -28,48 +28,48 @@ pub(super) struct Emit<'a> {
     pub(super) important: bool,
 }
 
-/// 延后到 pass 4 输出的子节点（普通子规则或 mixin 体里的子规则）。
+/// A child node deferred to pass 4 (a normal child rule or a child rule inside a mixin body).
 pub(super) struct ChildItem<'a> {
-    /// 触发它的语句起点（注释归属用）
+    /// Start of the statement that triggered it (for comment attribution)
     pub(super) at: usize,
     pub(super) child: Child<'a>,
     pub(super) inject: Option<Inject<'a>>,
     pub(super) important: bool,
 }
 
-/// 媒体块内延迟输出的嵌套媒体。
+/// A nested media deferred inside a media block.
 pub(super) struct Deferred<'a> {
     pub(super) at: &'a AtRule<'a>,
     pub(super) sels: Vec<Sel>,
     pub(super) spans: Vec<Span>,
     pub(super) level: usize,
-    /// 外层媒体的完整条件（合并用）
+    /// Full condition of the outer media (for merging)
     pub(super) outer: String,
-    /// 冒泡后仍要用的作用域（`@ruleset()` 的形参帧在延迟输出时还活着）
+    /// Scope still needed after bubbling (the parameter frame of `@ruleset()` is still alive when output is deferred)
     pub(super) inject: Option<Inject<'a>>,
 }
 
-/// `collect_block` 的输出汇与作用域。
+/// Output sink and scope for `collect_block`.
 pub(super) struct Sink<'a, 'c> {
     pub(super) pieces: &'c mut Vec<Piece<'a>>,
     pub(super) children: &'c mut Vec<ChildItem<'a>>,
-    /// `&` 折叠块的局部作用域（普通块为 `None`）
+    /// Local scope of a `&`-folded block (`None` for ordinary blocks)
     pub(super) inject: Option<Inject<'a>>,
-    /// 本块的 `&:extend(...)` / `:extend(...)`
+    /// This block's `&:extend(...)` / `:extend(...)`
     pub(super) needs: &'c mut Vec<Need>,
 }
 
 pub(super) enum Piece<'a> {
-    /// 块注释（IR 形态：文本已去掉 `/*` `*/`）
+    /// Block comment (IR form: the text with `/*` and `*/` removed)
     Comment(Comment),
     Decl(Emit<'a>),
-    /// 属性合并（`+:` / `+_:`）后的单条声明，占用同名首条声明的位置
+    /// A single declaration after property merging (`+:` / `+_:`), occupying the position of the first declaration with the same name
     Merged(Vec<Emit<'a>>),
-    /// 规则体内没有块的 at-rule（`@apply …;`）：less 把它当本层的节点
+    /// A blockless at-rule inside a rule body (`@apply …;`): less treats it as a node of this level
     AtRule(Span),
 }
 
-/// 合并组拆分：`+:` 开头另起一组（逗号），组内按空格拼接。返回下标分组。
+/// Merge group splitting: `+:` starts a new group (comma), and items within a group are joined by spaces. Returns index groups.
 pub(super) fn merge_groups(decls: &[&Declaration]) -> Vec<Vec<usize>> {
     let mut groups: Vec<Vec<usize>> = Vec::new();
     let mut space: Vec<usize> = Vec::new();
@@ -87,8 +87,8 @@ pub(super) fn merge_groups(decls: &[&Declaration]) -> Vec<Vec<usize>> {
     groups
 }
 
-/// 子块（会递归输出）的区间，用于把注释归属到最内层块。
-/// 节点树里是否含命名空间查找（决定运算要不要走文本求值）。
+/// Spans of child blocks (emitted recursively), used to attribute comments to the innermost block.
+/// Whether the node tree contains a namespace lookup (decides whether an operation goes through text evaluation).
 pub(super) fn has_lookup(v: &ComponentValue) -> bool {
     match v {
         ComponentValue::LessNamespaceValue(_) => true,
@@ -98,7 +98,7 @@ pub(super) fn has_lookup(v: &ComponentValue) -> bool {
     }
 }
 
-/// less `anonymousValue()` 的字符集：命中则整段值按源文本输出（不解析、不求值）。
+/// Character set of less `anonymousValue()`: on a hit the whole value is emitted as source text (no parsing, no evaluation).
 pub(super) fn anonymous_value(raw: &str) -> bool {
     !raw.chars().any(|c| {
         matches!(
@@ -121,8 +121,8 @@ pub(super) fn anonymous_value(raw: &str) -> bool {
     })
 }
 
-/// `@media` prelude 里的注释挂到下一个值上：在随后的 `:` 后插入 ` /*…*/`。
-/// 返回找不到 `:` 的余下注释（由调用方移到体内）。
+/// Comments in an `@media` prelude attach to the next value: insert ` /*…*/` after the following `:`.
+/// Returns the leftover comments for which no `:` was found (the caller moves them into the body).
 pub(super) fn attach_to_feature_values(
     text: &str,
     pending: &[(usize, Comment)],
@@ -145,15 +145,15 @@ pub(super) fn attach_to_feature_values(
     (out, leftover)
 }
 
-/// `(reference)` 导入体的包装 at-rule。
-/// 无块 at-rule 里 `@name` 之后的文本（引子）。
+/// The wrapper at-rule for a `(reference)` import body.
+/// The text after `@name` in a blockless at-rule (the prelude).
 pub(super) fn blockless_rest<'s>(at: &AtRule, src: &'s str) -> &'s str {
     let start = at.name.span().end;
     let end = at.span.end.max(start).min(src.len());
     src.get(start..end).unwrap_or("").trim()
 }
 
-/// 值里的 `$prop` 引用名（`$color` → `color`）。
+/// Names of `$prop` references in a value (`$color` → `color`).
 pub(super) fn collect_prop_vars<'a>(cv: &ComponentValue<'a>, out: &mut Vec<String>) {
     match cv {
         ComponentValue::LessPropertyVariable(p) => out.push(p.name.name.to_string()),
@@ -172,8 +172,8 @@ pub(super) fn collect_prop_vars<'a>(cv: &ComponentValue<'a>, out: &mut Vec<Strin
 }
 
 impl<'a> Compiler<'a> {
-    /// 无块 at-rule 的裸语句（`@nope;` / `@nope [foo];`）：less 把它当变量调用，
-    /// 根层报错且不产出 CSS（以前会直接输出一行 `@nope;`）。
+    /// A bare statement of a blockless at-rule (`@nope;` / `@nope [foo];`): less treats it as a variable call,
+    /// reports an error at the root level, and produces no CSS (it used to emit a raw `@nope;` line).
     pub(super) fn bare_at_rule(&mut self, at: &'a AtRule, wrapped: bool) {
         let rest = blockless_rest(at, self.src);
         if rest.is_empty() {
@@ -188,7 +188,7 @@ impl<'a> Compiler<'a> {
         }
         let name = at.name.name;
         let message = match self.var_ruleset(name, 0) {
-            // 变量是 detached ruleset：查找结果是一条声明，根层不允许
+            // The variable is a detached ruleset: lookup yields a declaration, which is not allowed at the root level
             Some(_) => {
                 "Properties must be inside selector blocks. They cannot be in the root".to_string()
             }
@@ -198,8 +198,8 @@ impl<'a> Compiler<'a> {
         self.env.miss(message, at.span);
     }
 
-    /// 根层 `@import` 是否按原样提前：prelude 要按子项的注入作用域插值后再判断
-    /// （`.add_an_import("file.css")` 这类 mixin 里的 `@import "@{x}"`）。
+    /// Whether a root-level `@import` is hoisted as-is: the prelude must be interpolated in the child's injection scope before the test
+    /// (`@import "@{x}"` inside a mixin such as `.add_an_import("file.css")`).
     pub(super) fn hoists(&self, at: &AtRule, inject: &Option<Inject<'a>>) -> bool {
         if !is_import(at) {
             return false;
@@ -221,7 +221,7 @@ impl<'a> Compiler<'a> {
         is_hoisted_import(&text)
     }
 
-    /// 输出一条 at-rule 子项（带上 mixin 注入作用域与 `!important` 状态）。
+    /// Emits an at-rule child (with the mixin injection scope and `!important` state).
     pub(super) fn emit_child_at(
         &mut self,
         at: &'a AtRule,
@@ -247,7 +247,7 @@ impl<'a> Compiler<'a> {
         result
     }
 
-    /// 展开一条子规则（选择器插值要在调用处作用域里求值）。
+    /// Expands a child rule (selector interpolation must be evaluated in the caller's scope).
     #[allow(clippy::too_many_arguments)]
     pub(super) fn emit_child_rule(
         &mut self,
@@ -263,7 +263,7 @@ impl<'a> Compiler<'a> {
         let saved = self.force_important;
         let saved_path = self.path.len();
         self.force_important |= important;
-        // 选择器里的块注释：less 在 `selectors()` 里清空 commentStore，直接丢掉
+        // Block comments inside selectors: less clears the commentStore in `selectors()` and drops them
         self.mark_comments(sel.span);
         self.env.push_scope(&inject);
         let own = self.selector_sels(sel);
@@ -271,8 +271,8 @@ impl<'a> Compiler<'a> {
         let mut combined_spans: Vec<Span> = Vec::new();
         let mut extends: Vec<Vec<Need>> = Vec::new();
         for (child, needs, child_span) in &own {
-            // 插值带出的逗号先按文本拆开，再与父选择器组合（less 的插值就是文本级替换）：
-            // `.d@{.a,.b,.c}&:hover` → `.d.a`, `.b`, `.c&:hover`，各自再拼父选择器。
+            // Commas introduced by interpolation are split at the text level first, then combined with parent selectors (less interpolation is text-level substitution):
+            // `.d@{.a,.b,.c}&:hover` → `.d.a`, `.b`, `.c&:hover`, each later joined with the parent selectors.
             let text = extend::render(child);
             let parts = split_selectors(&text);
             let pieces = match parts.len() {
@@ -281,8 +281,8 @@ impl<'a> Compiler<'a> {
                 _ => parts.iter().map(|p| extend::parse(p)).collect(),
             };
             for piece in pieces {
-                // 映射用来源区间取路径最外层选择器：嵌套规则的首个映射落在父规则行
-                // （与 less 的 `Selector.elements[0].span` 一致）。
+                // For mapping, the source span comes from the outermost selector of the path: a nested rule's first mapping lands on the parent rule's line
+                // (matching less's `Selector.elements[0].span`).
                 let mut push = |product: Sel, span: Span| {
                     for sel in split_interpolated(product) {
                         combined.push(sel);
@@ -291,8 +291,8 @@ impl<'a> Compiler<'a> {
                     }
                 };
                 let products = extend::combine(parents, &piece);
-                // 映射按父路径取来源区间（顺序与 combine 的父选择器循环一致）；
-                // 单文件/无父选择器沿用子选择器区间，与改动前的 map 字节一致。
+                // Mapping takes source spans along the parent path (in the same order as combine's parent loop);
+                // with a single file or no parent selectors the child selector span is kept, matching the previous map bytes.
                 let spans: Vec<Span> = {
                     let root_span = |idx: usize| match self.multi_source {
                         true if !parents.is_empty() && products.len() == parents.len() => {
@@ -338,7 +338,7 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    /// 收集一层块：pass 1 注册变量、pass 2 收集声明与子规则（保持源序）。
+    /// Collects one block level: pass 1 registers variables, pass 2 collects declarations and child rules (in source order).
     pub(super) fn collect_block(
         &mut self,
         stmts: &'a [Statement<'a>],
@@ -357,7 +357,7 @@ impl<'a> Compiler<'a> {
                 Statement::LessVariableDeclaration(d) => {
                     self.note_var(d);
                 }
-                // (reference) 体里的变量照常可见
+                // Variables in a (reference) body remain visible as usual
                 Statement::AtRule(a) if is_reference(a) => {
                     for inner in a.block.iter().flat_map(|b| b.statements.iter()) {
                         if let Statement::LessVariableDeclaration(d) = inner {
@@ -368,8 +368,8 @@ impl<'a> Compiler<'a> {
                 _ => {}
             }
         }
-        // less 的 `Variable.eval` 会求值每条变量声明的值（即使没被引用），
-        // 值里的未定义引用同样报错；此时同作用域的变量已收集齐（惰性求值仍成立）。
+        // less's `Variable.eval` evaluates every variable declaration's value (even when unreferenced),
+        // and undefined references in the value are reported too; by then the variables of the same scope are all collected (lazy evaluation still holds).
         for st in stmts {
             if let Statement::LessVariableDeclaration(d) = st {
                 self.eval_var_value(d);
@@ -389,8 +389,8 @@ impl<'a> Compiler<'a> {
             }
             match st {
                 Statement::Declaration(d) => {
-                    // 根层声明 less 报「properties in root」；我们保持宽松，但属性名里的
-                    // 未定义插值仍按 less 的求值顺序报错。
+                    // less reports "properties in root" for root-level declarations; this stays lenient, but
+                    // undefined interpolation in the property name is still reported in less's evaluation order.
                     if !wrapped {
                         let span = *d.name.span();
                         self.interpolate_at(self.slice(span), span);
@@ -409,7 +409,7 @@ impl<'a> Compiler<'a> {
                     };
                     self.expand_mixin(call, start, false, &mut out, 0);
                 }
-                // `@dr();`：detached ruleset 调用
+                // `@dr();`: detached ruleset call
                 Statement::LessVariableCall(call) => {
                     let mut out = Out {
                         pieces,
@@ -418,7 +418,7 @@ impl<'a> Compiler<'a> {
                     };
                     self.expand_ruleset_call(call, start, &mut out);
                 }
-                // `each(list, ruleset)` 是语句级函数：要展开出规则
+                // `each(list, ruleset)` is a statement-level function: it must expand into rules
                 Statement::LessFunctionCall(f)
                     if value::function_name(f).eq_ignore_ascii_case("each") =>
                 {
@@ -430,7 +430,7 @@ impl<'a> Compiler<'a> {
                     };
                     self.expand_each(f, &mut sink);
                 }
-                // 根层的裸函数调用（`e('text');`）：less 当普通节点输出
+                // A root-level bare function call (`e('text');`): less emits it as an ordinary node
                 Statement::LessFunctionCall(f) if !wrapped => children.push(ChildItem {
                     at: start,
                     child: Child::Other(f),
@@ -438,7 +438,7 @@ impl<'a> Compiler<'a> {
                     important: false,
                 }),
                 Statement::QualifiedRule(rule) => {
-                    // 单个 `&` 的嵌套规则被折进父规则（less `isJustParentSelector`）
+                    // A nested rule with a single `&` is folded into the parent rule (less `isJustParentSelector`)
                     if is_just_parent(&rule.selector, self.src) {
                         let mut out = Out {
                             pieces,
@@ -481,7 +481,7 @@ impl<'a> Compiler<'a> {
                     inject: inject.clone(),
                     important: false,
                 }),
-                // (reference) 导入体：规则登记为不可见，收尾时按 extend 命中情况输出/删除
+                // (reference) import body: rules are registered invisible and emitted/dropped at the end depending on extend hits
                 Statement::AtRule(at) if is_reference(at) => {
                     if let Some(block) = &at.block {
                         children.push(ChildItem {
@@ -492,9 +492,9 @@ impl<'a> Compiler<'a> {
                         });
                     }
                 }
-                // `@plugin` 只在解析期加载插件，不产生输出（less 的 plugin manager 消费）
+                // `@plugin` only loads plugins during parsing and produces no output (consumed by less's plugin manager)
                 Statement::AtRule(at) if at.name.name.eq_ignore_ascii_case("plugin") => {}
-                // 裸标识符/变量语句：less 当变量调用求值，根层报错且不产出 CSS
+                // Bare identifier/variable statement: less evaluates it as a variable call, reports an error at the root level, and produces no CSS
                 Statement::AtRule(at)
                     if at.block.is_none()
                         && (blockless_rest(at, self.src).is_empty()
@@ -502,7 +502,7 @@ impl<'a> Compiler<'a> {
                 {
                     self.bare_at_rule(at, wrapped);
                 }
-                // 规则体内没有块的 at-rule（`@apply x;`）：less 把它当本层的节点，留在块里
+                // A blockless at-rule inside a rule body (`@apply x;`): less treats it as a node of this level and keeps it in the block
                 Statement::AtRule(at) if wrapped && at.block.is_none() => {
                     pieces.push(Piece::AtRule(Span {
                         start: at.span.start,
@@ -525,7 +525,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// 把一条 piece 变成声明体里的节点（`Raw` 落点与紧凑输出共用）。
+    /// Turns a piece into a node in the declaration body (shared by `Raw` placement and compact output).
     pub(super) fn piece_item(&mut self, piece: &Piece<'a>) -> DeclItem {
         match piece {
             Piece::Comment(c) => DeclItem::Comment(c.clone()),
@@ -540,11 +540,11 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// 规则体的声明序列。
+    /// The declaration sequence of a rule body.
     ///
-    /// `(reference)` 体是唯一例外：声明节点 `isVisible()` 为 undefined，less 的
-    /// `ruleset.genCSS` 不插换行（`a: 1;b: 2;`），而 `Body::Decls` 的打印恒是一行一条，
-    /// 只能整段落 `Raw`（声明照常求值，只失去逐条映射）。
+    /// A `(reference)` body is the only exception: declaration nodes have `isVisible()` undefined, so less's
+    /// `ruleset.genCSS` inserts no newlines (`a: 1;b: 2;`), while `Body::Decls` always prints one per line;
+    /// the whole section therefore becomes a `Raw` (declarations are still evaluated, only per-item mapping is lost).
     pub(super) fn piece_body(&mut self, pieces: &[Piece<'a>]) -> Body {
         let items = pieces.iter().map(|piece| self.piece_item(piece)).collect();
         if !self.hidden {
@@ -565,7 +565,7 @@ impl<'a> Compiler<'a> {
         Body::Rules(vec![Item::Raw(Raw { text, marks })])
     }
 
-    /// 规则体内没有块的 at-rule（`@apply x;`）：less 原样回声，只拆出名字与引子。
+    /// A blockless at-rule inside a rule body (`@apply x;`): less echoes it verbatim, only splitting out the name and prelude.
     fn blockless_at(&self, span: Span) -> OutAtRule {
         let text = self.interpolate_at(self.slice(span).trim(), span);
         let body = text.strip_prefix('@').unwrap_or(&text);
@@ -591,7 +591,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// 同名属性合并后的单条声明：`+:` 用逗号、`+_:` 用空格分隔（less `_mergeRules`）。
+    /// A single declaration after merging same-named properties: `+:` separates with commas and `+_:` with spaces (less `_mergeRules`).
     pub(super) fn emit_merged(&mut self, items: &[Emit<'a>]) -> Decl {
         let refs: Vec<&Declaration<'a>> = items.iter().map(|e| e.decl).collect();
         self.env.push_scope(&items[0].inject);
@@ -613,7 +613,7 @@ impl<'a> Compiler<'a> {
                 self.env.pop_scope(&e.inject);
             }
         }
-        // less `_mergeRules`：`!important` 提升到合并后的整条声明末尾（只一次）
+        // less `_mergeRules`: `!important` is hoisted to the end of the merged declaration (once only)
         if embedded
             || items
                 .iter()
@@ -632,7 +632,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// 单条声明：属性名带源锚点，值整段文本（值里的 token 不再单独映射）。
+    /// A single declaration: the property name carries a source anchor and the value is one text block (tokens in the value are no longer mapped individually).
     pub(super) fn emit_declaration(
         &mut self,
         d: &'a Declaration<'a>,
@@ -643,22 +643,22 @@ impl<'a> Compiler<'a> {
         let value_span = d.value.first().map_or(d.span, |v| *v.span());
         let forced = force_important || self.force_important;
         let region = self.decl_value_region(d);
-        // 属性名到首个值 token 之间的注释：less 在 `ruleProperty()` 后清空 commentStore，直接丢掉
+        // Comments between the property name and the first value token: less clears the commentStore after `ruleProperty()` and drops them
         let value_start = d.value.first().map_or(d.span.end, |v| v.span().start);
         self.mark_comments(Span {
             start: d.span.start,
             end: value_start,
         });
-        // 值里的注释由 `emit_values_in` 原位输出（或按 less 丢弃），一律标为已处理
+        // Comments in the value are emitted in place by `emit_values_in` (or dropped as less does) and are all marked as handled
         if let Some((start, end, _)) = region {
             self.mark_comments(Span { start, end });
         }
         let mut value = String::new();
-        // less `anonymousValue()`：值里没有 `. # @ $ + / ' " * ` ( ; { } -` 时整段原文输出
+        // less `anonymousValue()`: when the value has none of `. # @ $ + / ' " * ` ( ; { } -`, the whole text is emitted as-is
         if let Some((start, end, true)) = region {
             let raw = self.src[start..end].trim_start();
             if anonymous_value(raw) {
-                // 被 `$prop` 重解析过的声明：`!important` 丢了前导空格（less 的就地变更）
+                // A declaration re-parsed by `$prop`: `!important` lost its leading space (less's in-place mutation)
                 let text = match self.reparsed.contains(&d.span.start) {
                     true => raw.trim_end().strip_suffix("!important").map_or_else(
                         || raw.to_string(),
@@ -683,7 +683,7 @@ impl<'a> Compiler<'a> {
         let embedded = self.emit_values_in(&d.value, region, &mut value);
         let important = d.important.is_some() || forced || embedded;
         if important {
-            // 被 `$prop` 重解析过的声明丢了前导空格（less 的就地变更）
+            // A declaration re-parsed by `$prop` lost its leading space (less's in-place mutation)
             if self.reparsed.contains(&d.span.start) {
                 value.push_str("!important");
             } else {
@@ -700,13 +700,13 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// 声明的值区间：`:` 之后到本声明的终止符（`;` / `}` / `{` / EOF）。
-    /// 返回 `(开始, 终止符位置, 是否以 `;` 结束)`。
+    /// The declaration's value region: after `:` up to the statement terminator (`;` / `}` / `{` / EOF).
+    /// Returns `(start, terminator position, whether it ends with `;`)`.
     pub(super) fn decl_value_region(&self, d: &Declaration) -> Option<(usize, usize, bool)> {
         self.region_from(d.colon_span.end)
     }
 
-    /// 从 `start` 扫到本语句的终止符（跳过引号/注释/括号内内容）。
+    /// Scans from `start` to this statement's terminator (skipping quoted/comment/bracketed content).
     pub(super) fn region_from(&self, start: usize) -> Option<(usize, usize, bool)> {
         if start > self.src.len() {
             return None;
@@ -752,13 +752,13 @@ impl<'a> Compiler<'a> {
         Some((start, bytes.len(), false))
     }
 
-    /// 值列表：逐段求值；段间空白按 less `Expression` 归一为单个空格，
-    /// 逗号两侧归一为 `, `，`/` 两侧保留源文本（less 的 `Operation` 保留 isSpaced）。
+    /// Value list: evaluated segment by segment; whitespace between segments is normalized to a single space as less `Expression` does,
+    /// commas are normalized to `, `, and the source text is kept around `/` (less's `Operation` preserves isSpaced).
     ///
-    /// 段间夹着块注释时保留注释原位（less 把注释当作值列表里的节点）。
+    /// When a block comment sits between segments it stays in place (less treats comments as nodes of the value list).
     ///
-    /// 返回是否在值里遇到了 `!important`（来自变量值），并把它从文本里摘掉——
-    /// less 把整条声明的 `!important` 归一到末尾只输出一次。
+    /// Returns whether `!important` was found in the value (coming from a variable value) and strips it from the text —
+    /// less hoists the whole declaration's `!important` to the end and emits it once.
     pub(super) fn emit_value_list(
         &mut self,
         values: &'a [ComponentValue<'a>],
@@ -767,7 +767,7 @@ impl<'a> Compiler<'a> {
         self.emit_values_in(values, None, out)
     }
 
-    /// `emit_value_list` 带值区间：区间里最后一项之后到终止符之间还可能有注释。
+    /// `emit_value_list` with a value region: there may still be comments between the last item and the terminator.
     pub(super) fn emit_values_in(
         &mut self,
         values: &'a [ComponentValue<'a>],
@@ -792,7 +792,7 @@ impl<'a> Compiler<'a> {
                         end: span.start,
                     });
                     let gap = if raw.contains("/*") {
-                        // less 把注释当值列表里的节点：前后各留一个空格
+                        // less treats comments as nodes of the value list: keep one space on each side
                         let body = raw.split_whitespace().collect::<Vec<_>>().join(" ");
                         if comma {
                             String::new()
@@ -811,8 +811,8 @@ impl<'a> Compiler<'a> {
                     out.push_str(&gap);
                 }
             }
-            // `10px / 2 * 2`：oxc 把 `/` 切成分隔符，右段在 less 里是除法链的一部分
-            // （math 关闭时整体原样输出），所以按源文本替换而不是求值。
+            // `10px / 2 * 2`: oxc splits `/` off as a delimiter, and the right segment is part of a division chain in less
+            // (emitted verbatim when math is off), so substitute the source text instead of evaluating.
             let text = match after_solidus {
                 true if matches!(v, ComponentValue::LessBinaryOperation(_)) => {
                     let raw = self.slice(span).trim().to_string();
@@ -831,8 +831,8 @@ impl<'a> Compiler<'a> {
             after_solidus = solidus;
             prev_end = Some(span.end);
         }
-        // 最后一项到终止符：普通空白丢掉（less 的 `Expression` 不留尾空白），
-        // 但块注释要在原位保留。
+        // From the last item to the terminator: ordinary whitespace is dropped (less's `Expression` leaves no trailing whitespace),
+        // but block comments stay in place.
         if let (Some(end), Some((_, stop, semi))) = (prev_end, region)
             && end <= stop
             && stop <= self.src.len()
@@ -840,7 +840,7 @@ impl<'a> Compiler<'a> {
             let tail = &self.src[end..stop];
             if tail.contains("/*") {
                 let comment_at = tail.find("/*").unwrap_or(0);
-                // less 的 `Expression` 在值节点与注释之间留一个空格
+                // less's `Expression` leaves one space between a value node and a comment
                 out.push(' ');
                 out.push_str(tail[comment_at..].trim_end());
             } else if semi && !embedded && tail.trim().is_empty() {
@@ -850,10 +850,10 @@ impl<'a> Compiler<'a> {
         embedded
     }
 
-    /// 单段求值（变量在 Scope 里查，文本变量直接返回）。
+    /// Evaluates a single segment (variables are looked up in the Scope; text variables are returned directly).
     pub(super) fn eval_text(&self, v: &'a ComponentValue<'a>) -> String {
         match v {
-            // `@p[text]` / `#ns[$prop]`：命名空间查找在取值时才发生（延迟解析）
+            // `@p[text]` / `#ns[$prop]`: namespace lookup happens only when the value is taken (lazy resolution)
             ComponentValue::LessNamespaceValue(ns) => match self.namespace_text(ns, 0) {
                 Ok(text) => text,
                 Err(message) => {
@@ -861,7 +861,7 @@ impl<'a> Compiler<'a> {
                     String::new()
                 }
             },
-            // 查找结果参与运算（`@sizes[base] * 2`）
+            // The lookup result takes part in an operation (`@sizes[base] * 2`)
             ComponentValue::LessBinaryOperation(op)
                 if has_lookup(&op.left) || has_lookup(&op.right) =>
             {
@@ -874,14 +874,14 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// 真正输出属性名时用：未定义变量按 less 报错。
+    /// Used when the property name is actually emitted: undefined variables are reported as less does.
     pub(super) fn prop_name_at(&self, d: &Declaration) -> String {
         let span = *d.name.span();
         let name = self.interpolate_at(self.slice(span), span);
         self.prop_name_with(d, name)
     }
 
-    /// 把 `+:` / `+_:` 的同名声明合并到首条位置（less `_mergeRules`）。
+    /// Merges same-named `+:` / `+_:` declarations into the first position (less `_mergeRules`).
     pub(super) fn merge_pieces(&self, pieces: Vec<Piece<'a>>) -> Vec<Piece<'a>> {
         let mut out: Vec<Piece<'a>> = Vec::with_capacity(pieces.len());
         let mut slots: HashMap<String, usize> = HashMap::new();
@@ -907,8 +907,8 @@ impl<'a> Compiler<'a> {
         out
     }
 
-    /// less 的 `ruleset.parseValue` 会就地重解析被 `$prop` 引用的声明，重解析后的
-    /// 声明 `important` 字段是 `!important`（无前导空格）——输出时没有空格。
+    /// less's `ruleset.parseValue` re-parses declarations referenced by `$prop` in place, and after re-parsing
+    /// the declaration's `important` field is `!important` (no leading space) — so output has no space.
     pub(super) fn mark_reparsed_props(&mut self, pieces: &[Piece<'a>]) {
         let mut names: Vec<String> = Vec::new();
         for piece in pieces {
@@ -938,7 +938,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// 本层属性表：同名多条保留全部（`$prop` 取最后一条或合并结果）。
+    /// This level's property table: all same-named entries are kept (`$prop` takes the last one or the merged result).
     pub(super) fn collect_props(
         &self,
         pieces: &[Piece<'a>],
@@ -977,26 +977,26 @@ impl<'a> Compiler<'a> {
         layer: &mut Layer,
     ) -> Result<(), Box<CompileError>> {
         let name = at.name.name.to_string();
-        // 单文件保持既有 map：at-rule 透传的选择器不单独映射。
+        // A single file keeps the existing map: selectors passed through an at-rule are not mapped separately.
         let parent_spans = if self.multi_source { parent_spans } else { &[] };
         if name == "import" {
             return self.emit_import(at, layer);
         }
-        // less 的 `@charset` 只输出第一条（后续的丢弃）
+        // less emits only the first `@charset` (later ones are dropped)
         if name.eq_ignore_ascii_case("charset") {
             if self.charset {
                 return Ok(());
             }
             self.charset = true;
         }
-        // less `JoinSelectorVisitor.visitAtRule`：声明式 at-rule（@font-face/@keyframes/@page…）
-        // 的体是 root ruleset，父选择器不往里传播（只有 @document/@supports 会继承）。
+        // less `JoinSelectorVisitor.visitAtRule`: the body of a declarative at-rule (@font-face/@keyframes/@page…)
+        // is a root ruleset, so parent selectors do not propagate into it (only @document/@supports inherit them).
         let (parents, parent_spans) = if at_rule_keeps_parents(&name) {
             (parents, parent_spans)
         } else {
             (&[][..], &[][..])
         };
-        // 媒体块内再出现 @media：条件是合并且冒泡到同级（less 的 media bubble）
+        // An @media inside a media block: conditions are merged and it bubbles to the same level (less's media bubble)
         if name.eq_ignore_ascii_case("media")
             && let Some((outer, outer_level)) = self.media.last().cloned().flatten()
         {
@@ -1016,7 +1016,7 @@ impl<'a> Compiler<'a> {
         self.emit_at_rule_inner(at, parents, parent_spans, level, None, layer)
     }
 
-    /// `@keyframes` 体里的百分比/关键字块（oxc 把它归为独立语句，不是规则）。
+    /// A percentage/keyword block inside an `@keyframes` body (oxc classifies it as a standalone statement, not a rule).
     pub(super) fn emit_keyframe(
         &mut self,
         k: &'a KeyframeBlock<'a>,
@@ -1060,7 +1060,7 @@ impl<'a> Compiler<'a> {
             k.block.span,
             layer,
         )?;
-        // `@keyframes` 体内的块是 keyframe 而不是 style rule：彼此之间没有空行。
+        // Blocks inside an `@keyframes` body are keyframes, not style rules: there are no blank lines between them.
         let frames = layer.items.split_off(start);
         for frame in frames {
             layer.items.push(match frame {
@@ -1098,7 +1098,7 @@ impl<'a> Compiler<'a> {
             }
             other => other.unwrap_or(prelude),
         };
-        // 先占位：壳在 `items` 里的下标就是 `(reference)` 剪枝的区间起点。
+        // Reserve a slot first: the shell's index in `items` is the start of the `(reference)` pruning range.
         let index = layer.items.len();
         layer.items.push(Item::AtRule(OutAtRule {
             name,
@@ -1117,8 +1117,8 @@ impl<'a> Compiler<'a> {
                 self.deferred.push(Vec::new());
                 let has_body = !block.statements.is_empty();
                 let mut body = layer.child(index);
-                // 空块里的 prelude 注释：@keyframes 这类标识符型 at-rule 靠注释撑出块，
-                // @media 的空块整条丢掉（less `to-css-visitor` 的 prune）。
+                // Prelude comments in an empty block: identifier-like at-rules such as @keyframes keep the block alive through comments,
+                // while an empty @media block is dropped entirely (less `to-css-visitor` prune).
                 if has_body || !moved.is_empty() && !is_media {
                     body.items.extend(moved.into_iter().map(Item::Comment));
                 }
@@ -1139,17 +1139,17 @@ impl<'a> Compiler<'a> {
                 self.media.pop();
                 self.scope = saved;
                 let body = body.into_body(level + 1);
-                // 空块不输出（less 丢弃空规则集/空媒体块）
+                // Empty blocks are not emitted (less drops empty rulesets/empty media blocks)
                 if body.is_empty() {
                     layer.items.pop();
                 } else if let Item::AtRule(shell) = &mut layer.items[index] {
                     shell.body = Some(body);
-                    // 壳的区间到此为止：冒泡出去的嵌套媒体在壳外，不算壳的内容
+                    // The shell's range ends here: a bubbled nested media lies outside the shell and is not part of its content
                     if self.hidden {
                         self.ref_ranges.push((layer.path.clone(), index, index + 1));
                     }
                 }
-                // 块内的嵌套媒体现在追在块后面（less 的输出顺序）
+                // Nested media from the block now follow it (less's output order)
                 for item in deferred {
                     self.env.push_scope(&item.inject);
                     self.emit_at_rule_inner(
@@ -1168,7 +1168,7 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    /// `@import "x.less";` 内联。
+    /// Inlines `@import "x.less";`.
     pub(super) fn emit_import(
         &mut self,
         at: &'a AtRule,
@@ -1178,29 +1178,29 @@ impl<'a> Compiler<'a> {
             return Ok(());
         };
         let raw = self.slice(*prelude.span()).trim().to_string();
-        // 注释不算路径/媒体条件：less 把它们移到语句之外（仍作为块注释输出）
+        // Comments are not part of the path/media condition: less moves them outside the statement (still emitted as block comments)
         let raw = strip_block_comments(&raw);
         let raw = self.interpolate_at(&raw, *prelude.span());
         let (options, _) = split_import_options(&raw);
         let optional = options.iter().any(|o| o == "optional");
         let inline = options.iter().any(|o| o == "inline");
         let forced_less = options.iter().any(|o| o == "less");
-        // 媒体条件里的变量在当前位置求值（less 在 prelude 层求值）
+        // Variables in the media condition are evaluated at the current position (less evaluates at the prelude level)
         let raw = value::substitute(&raw, self.src, &self.env, 0, Some(*prelude.span()));
         let (_, rest) = split_import_options(&raw);
         let Some((href, media)) = split_quoted_path(&rest) else {
-            // 无路径 → 原样输出
+            // No path → emit as-is
             self.push_at(layer, at, raw.trim());
             return Ok(());
         };
         let media = media.trim().to_string();
 
-        // 远程 / .css / .wxss / `?css`（未标 (less)）→ 保留为 CSS import（不内联）
+        // Remote / .css / .wxss / `?css` (not marked (less)) → kept as a CSS import (not inlined)
         if !forced_less
             && !inline
             && (is_remote(&href) || is_css_path(&href) || href.ends_with(".wxss"))
         {
-            // 媒体条件按 less 的归一化输出（`(min-width:100px)` → `(min-width: 100px)`）
+            // The media condition is normalized as less does (`(min-width:100px)` → `(min-width: 100px)`)
             let text = match raw.ends_with(&media) && !media.is_empty() {
                 true => format!(
                     "{} {}",
@@ -1213,7 +1213,7 @@ impl<'a> Compiler<'a> {
             return Ok(());
         }
 
-        // 规范化路径：emit 期内联要与文本内联共用同一套 import-once 去重键
+        // Canonicalize the path: emit-time inlining shares the same import-once dedup key as text inlining
         let Some(resolved) = self
             .resolve_import(&href)
             .map(|p| p.canonicalize().unwrap_or(p))
@@ -1222,13 +1222,13 @@ impl<'a> Compiler<'a> {
                 return Ok(());
             }
             return Err(CompileError::new(format!(
-                "@import 未找到: {href}（from {}）",
+                "@import not found: {href} (from {})",
                 self.file_path.display()
             ))
             .into());
         };
         if inline && !forced_less {
-            // less 的 (inline)：原文写出，不参与解析；带媒体条件时整体包进 @media
+            // less's (inline): written out verbatim without parsing; wrapped entirely in @media when a media condition is present
             let text = std::fs::read_to_string(&resolved)
                 .map_err(|e| Box::new(CompileError::new(e.to_string())))?;
             self.deps.push(resolved.to_string_lossy().to_string());
@@ -1251,13 +1251,13 @@ impl<'a> Compiler<'a> {
 
         let source = std::fs::read_to_string(&resolved).map_err(|e| {
             Box::new(CompileError::new(format!(
-                "读取 {} 失败: {e}",
+                "failed to read {}: {e}",
                 resolved.display()
             )))
         })?;
 
-        // 第一版：@import 用独立编译实例内联（变量作用域不跨文件，map 不跨文件）。
-        // less 的 import 其实是文本级合并（共享作用域），这是已知偏差，后续补。
+        // First version: @import is inlined with an independent compiler instance (variable scopes do not cross files, and neither does the map).
+        // A less import is actually a text-level merge (shared scope); this is a known deviation to be fixed later.
         let sub_opts = Options {
             paths: self.options.paths.clone(),
             less: crate::LessOptions {
@@ -1267,17 +1267,17 @@ impl<'a> Compiler<'a> {
             project_root: None,
         };
         let sub = crate::less::compile(&resolved, &source, &sub_opts)?;
-        // 子编译产物自带尾随换行；`Raw` 的项间换行由 `doc::print` 补。
+        // The sub-compilation output has its own trailing newline; `doc::print` adds the newlines between `Raw` items.
         let css = sub.css.strip_suffix('\n').unwrap_or(&sub.css);
         self.push_raw(layer, css.to_string());
         self.deps.extend(sub.deps);
         Ok(())
     }
 
-    /// 回显一条保留为 CSS 的 `@import`（不内联）。
+    /// Echoes an `@import` kept as CSS (not inlined).
     ///
-    /// less 回显的是求值后的引子（路径 + 媒体条件），所以按 `AtRule` 落项：名字映射到
-    /// `@`，引子原样出（与改动前的字节一致）。
+    /// less echoes the evaluated prelude (path + media condition), so this is placed as an `AtRule`: the name maps to
+    /// `@` and the prelude comes out verbatim (matching the previous bytes).
     fn push_at(&self, layer: &mut Layer, at: &AtRule, prelude: &str) {
         layer.items.push(Item::AtRule(OutAtRule {
             name: at.name.name.to_string(),
@@ -1289,9 +1289,9 @@ impl<'a> Compiler<'a> {
         }));
     }
 
-    /// 整段原样落一个 `Raw` 子项（`(inline)` 文件内容、子编译产物）。
+    /// Places a whole text block as one `Raw` child item (`(inline)` file content, sub-compilation output).
     ///
-    /// 空文本不落项：IR 的项间换行会凭空多出一个空行。
+    /// Empty text is not placed: the IR newline between items would create a phantom blank line.
     fn push_raw(&self, layer: &mut Layer, text: String) {
         if text.is_empty() {
             return;

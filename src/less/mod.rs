@@ -1,10 +1,10 @@
-//! less 编译器：作用域、规则展开、@import、打印。
+//! The less compiler: scopes, rule expansion, @import, printing.
 //!
-//! 语义对齐 less@4.1.3：
-//! - 变量 lazy（同作用域后定义胜出，值在使用时求值）
-//! - 声明与嵌套规则分离（父规则的声明先收集、合并输出，再展开子规则）
-//! - 选择器组合顺序：子选择器在外层、父选择器在内层（less 实测）
-//! - `&` 文本替换；`@import` 内联
+//! Semantics follow less@4.1.3:
+//! - Variables are lazy (later definitions in the same scope win; values are evaluated on use)
+//! - Declarations and nested rules are separated (the parent rule's declarations are collected and merged first, then child rules are expanded)
+//! - Selector combination order: the child selector is on the outside and the parent selector on the inside (measured with less)
+//! - `&` text replacement; `@import` inlining
 
 pub(crate) mod comments;
 pub(crate) mod emit;
@@ -40,7 +40,7 @@ use imports::expand_imports;
 use prelude::{has_plugin, is_charset, is_import};
 use value::VarRef;
 
-/// 去掉值文本末尾的 `!important`（来自变量值），返回去重后的文本。
+/// Strips a trailing `!important` from the value text (coming from a variable value) and returns the remaining text.
 pub(super) fn strip_embedded_important(text: &str) -> Option<String> {
     let trimmed = text.trim_end();
     let cut = trimmed.len().checked_sub("!important".len())?;
@@ -52,51 +52,51 @@ pub(super) fn strip_embedded_important(text: &str) -> Option<String> {
 
 pub(crate) struct Compiler<'a> {
     env: Env<'a>,
-    /// 合并串与文件/段表（收尾交给 `doc::print`）。
+    /// Merged text plus file/segment tables (handed to `doc::print` at the end).
     merged: &'a Merged,
     src: &'a str,
-    /// 参与编译的源文件多于一个（`@import` 内联）；单文件保持既有 map 字节。
+    /// More than one source file takes part in compiling (`@import` inlining); a single file keeps the existing map bytes.
     multi_source: bool,
     file_path: PathBuf,
-    /// 相对项目根的路径形态（用于错误信息/deps）。
+    /// Paths relative to the project root (for error messages/deps).
     deps: Vec<String>,
-    /// 被 @import 内联的文件绝对路径（去重）。
+    /// Absolute paths of files inlined by @import (deduplicated).
     seen: Vec<PathBuf>,
-    /// 全部 mixin 定义（带括号与无括号），同名可多条（less 会全部匹配）。
+    /// All mixin definitions (with and without parentheses); several may share a name (less matches them all).
     mixins: Defs<'a>,
-    /// 当前所在的规则选择器 token 链（mixin 解析用）。
+    /// The current rule selector token chain (used for mixin resolution).
     path: Vec<String>,
-    /// 与 `path` 等长：该层能否作为命名空间链路元素被零实参进入。
+    /// Same length as `path`: whether this level can be entered with zero arguments as a namespace chain element.
     path_linkable: Vec<bool>,
-    /// 正在展开的 mixin 体与实参签名（防止无终止条件的自递归）。
+    /// Mixin bodies currently being expanded and their argument signatures (to prevent self-recursion without a terminating condition).
     active: Vec<(*const SimpleBlock<'a>, String)>,
-    /// 正在输出的规则体（less 的 `isRecursive`：同名规则不匹配自身）。
+    /// Rule bodies currently being emitted (less's `isRecursive`: a same-named rule does not match itself).
     rule_bodies: Vec<*const SimpleBlock<'a>>,
-    /// 当前层是否处于 `!important` 调用展开的规则内（子规则继承）。
+    /// Whether the current level is inside a rule expanded from an `!important` call (child rules inherit it).
     force_important: bool,
-    /// 块注释 span（`//` 行注释 less 丢弃，不收集）。
+    /// Block comment spans (`//` line comments are discarded by less and not collected).
     comments: Vec<(usize, usize)>,
-    /// 已随区块输出过的注释（避免根层 flush 重复输出）
+    /// Comments already emitted with a block (so the root-level flush does not emit them again)
     comment_done: Vec<bool>,
     comment_idx: usize,
     options: &'a Options,
-    /// extend 求值器（选择器改写延后到收尾）
+    /// The extend evaluator (selector rewriting is deferred to the end)
     extends: extend::Engine,
-    /// 当前所在的媒体/at-rule 作用域
+    /// The current media/at-rule scope
     scope: usize,
-    /// 媒体块内延迟输出的嵌套媒体（less 会把条件合并后冒泡到同级）
+    /// Nested media deferred inside a media block (less merges conditions and bubbles them to the same level)
     deferred: Vec<Vec<Deferred<'a>>>,
-    /// 当前块所属 @media 的完整条件与所在层（非媒体块为 `None`）
+    /// Full condition and level of the @media containing the current block (`None` outside media blocks)
     media: Vec<Option<(String, usize)>>,
-    /// 是否已经输出过 @charset（less 只保留第一条）
+    /// Whether @charset has been emitted (less keeps only the first one)
     charset: bool,
-    /// mixin / detached ruleset 的体区间（体内注释不归根层）
+    /// Body spans of mixins / detached rulesets (comments inside them do not belong to the root level)
     def_spans: Vec<Span>,
-    /// 被 `$prop` 引用过的声明（less 会在引用时重解析该声明，`!important` 丢掉前导空格）
+    /// Declarations referenced by `$prop` (less re-parses such a declaration on reference, and `!important` loses its leading space)
     reparsed: std::collections::HashSet<usize>,
-    /// 当前是否在 `(reference)` 导入体里输出（规则默认不可见、整块最终可能被删掉）
+    /// Whether output is currently inside a `(reference)` import body (rules are invisible by default and the whole block may be dropped)
     hidden: bool,
-    /// `(reference)` 块的产出区间：块里一条可见规则都没有时整段剪掉
+    /// Output ranges of `(reference)` blocks: the whole range is pruned when the block has no visible rule
     ref_ranges: Vec<(Vec<usize>, usize, usize)>,
 }
 
@@ -105,8 +105,8 @@ pub(crate) fn compile(
     source: &str,
     opts: &Options,
 ) -> Result<Output, Box<CompileError>> {
-    // less 把 `@import` 当作文本级内联：导入的文件与宿主共享作用域。
-    // 入口文件也按规范路径登记，否则 `a -> b -> a` 的循环导入会把入口再内联一次
+    // less treats `@import` as text-level inlining: the imported file shares the host's scope.
+    // The entry file is registered by its canonical path too, otherwise a circular import `a -> b -> a` would inline the entry again
     let mut seen = vec![path.canonicalize().unwrap_or_else(|_| path.to_path_buf())];
     let mut deps = Vec::new();
     let mut merged = Merged::new();
@@ -128,7 +128,7 @@ pub(crate) fn compile(
         .comments()
         .build();
     let ast = parser.parse::<Stylesheet>().map_err(|e| {
-        // 解析发生在合并串上，偏移经段表回到出错文件与原文位置
+        // Parsing happens on the merged text; offsets are mapped through the segment table back to the failing file and the original position
         let (file, local) = merged
             .locate_exact(e.span.start)
             .unwrap_or((0, e.span.start));
@@ -137,7 +137,7 @@ pub(crate) fn compile(
             None => (None, None, None),
         };
         Box::new(CompileError {
-            message: format!("less 解析失败: {}", e.kind),
+            message: format!("less parse failed: {}", e.kind),
             path,
             line,
             column,
@@ -168,7 +168,7 @@ pub(crate) fn compile(
         &mut conds,
         &mut compiler.mixins,
     );
-    // mixin / detached ruleset 体内的块注释不归根层，由展开时逐次输出
+    // Block comments inside mixin / detached ruleset bodies do not belong to the root level; they are emitted one by one during expansion
     collect_definition_spans(&ast.statements, &mut compiler.def_spans);
     let mut root_layer = Layer::default();
     compiler.emit_block(
@@ -188,20 +188,23 @@ pub(crate) fn compile(
         &mut root_layer,
     )?;
     compiler.flush_comments(source.len(), &mut root_layer);
-    debug_assert!(root_layer.decls.is_empty(), "根层不产出裸声明");
+    debug_assert!(
+        root_layer.decls.is_empty(),
+        "the root layer produces no bare declarations"
+    );
     compiler.finish(root_layer.items)
 }
 
 impl<'a> Compiler<'a> {
     pub(super) fn new(path: &Path, merged: &'a Merged, opts: &'a Options) -> Self {
         let multi_source = merged.files.len() > 1;
-        // globalVars（useCompilerPlugins 二元组 options）作为最外层文本变量
+        // globalVars (a pair of options from useCompilerPlugins) become the outermost text variables
         let mut root = HashMap::new();
         for (k, v) in &opts.less.global_vars {
             root.insert(k.clone(), VarRef::Text(v.clone()));
         }
         let mut env = Env::new(root);
-        // 文件类函数相对于入口 less 文件所在目录（less 的 `entryPath`）
+        // File functions are relative to the directory of the entry less file (less's `entryPath`)
         env.roots = Some(Rc::new(Roots {
             dir: path.parent().unwrap_or(Path::new(".")).to_path_buf(),
             paths: opts.paths.clone(),
@@ -236,16 +239,16 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// 合并串切片（span 来自以合并串解析出的 AST）。
+    /// Slice of the merged text (spans come from an AST parsed over the merged text).
     pub(super) fn slice(&self, span: Span) -> &str {
         self.src.get(span.start..span.end).unwrap_or("")
     }
 
-    /// 收尾：extend 改写选择器 → `(reference)` 剪枝 → 交给 `doc::print`。
+    /// Finishing: extend rewrites selectors → `(reference)` pruning → hand over to `doc::print`.
     pub(super) fn finish(mut self, mut items: Vec<Item>) -> Result<Output, Box<CompileError>> {
         self.extends.run();
         rewrite(&mut items, &self.extends);
-        // 剪枝要早于删占位符：区间下标是建树时的（删项会让下标失效）。
+        // Pruning must come before dropping placeholders: range indices are from tree construction (removing items would invalidate them).
         prune(&mut items, &mut Vec::new(), &mut self.ref_ranges);
         drop_placeholders(&mut items);
         if let Some((message, span)) = self.env.misses.borrow().first().cloned() {
@@ -265,7 +268,7 @@ impl<'a> Compiler<'a> {
             }));
         }
         let entry = self.file_path.to_string_lossy();
-        // `sourcesContent` 只在多源时写（lessc 的 `outputSourceFiles` 跟内联走）。
+        // `sourcesContent` is written only with multiple sources (lessc's `outputSourceFiles` follows inlining).
         let style = Style {
             sources_content: self.multi_source,
             ..Style::LESS
@@ -278,10 +281,10 @@ impl<'a> Compiler<'a> {
         })
     }
 
-    /// 区块展开：变量收集 → 声明输出 → 子规则递归。
+    /// Block expansion: variable collection → declaration emission → child rule recursion.
     ///
-    /// `block_span` 是本块的 `{…}` 区间，用于把块注释归属到具体层级（less 里注释是所在
-    /// 规则数组的一个节点）。块内注释包含「挂在子规则上的注释」，但不含子块内部的。
+    /// `block_span` is this block's `{…}` span, used to attribute block comments to a specific level (in less a comment is
+    /// a node of the containing rule array). Comments in a block include "comments attached to child rules" but exclude those inside child blocks.
     pub(super) fn emit_block(
         &mut self,
         stmts: &'a [Statement<'a>],
@@ -293,7 +296,7 @@ impl<'a> Compiler<'a> {
     ) -> Result<(), Box<CompileError>> {
         let saved_hidden = self.hidden;
         self.env.push();
-        // 本块是否会输出带选择器的块（决定注释归属：块内注释进本块，根层注释留到 pass 4）
+        // Whether this block emits a block with selectors (decides comment attribution: comments in a block go to this block, root-level ones wait for pass 4)
         let wrapped = !head.sels.is_empty() || bare;
         let mut pieces: Vec<Piece<'a>> = Vec::new();
         let mut children: Vec<ChildItem<'a>> = Vec::new();
@@ -305,19 +308,19 @@ impl<'a> Compiler<'a> {
             needs: &mut needs,
         };
         self.collect_block(stmts, block_span, wrapped, &mut sink);
-        // 规则登记要在子规则之前（less 的 extend 按树序收集）
+        // The rule must be registered before child rules (less collects extends in tree order)
         let rule = self.register_rule(&head, &needs);
-        // 属性合并（`+:` / `+_:`）与 `$prop` 的属性表
+        // Property merging (`+:` / `+_:`) and the property table for `$prop`
         let pieces = self.merge_pieces(pieces);
         self.env.set_props(self.collect_props(&pieces));
         self.mark_reparsed_props(&pieces);
         let pieces = self.dedupe_pieces(pieces);
 
-        // pass 3：输出本层规则（空块不输出；只有注释时也要包出选择器块）
+        // pass 3: emit this level's rules (empty blocks are not emitted; with only comments a selector block is still wrapped)
         if !pieces.is_empty() && head.sels.is_empty() && bare {
-            // @font-face / @page：块内是裸声明，没有选择器包裹
+            // @font-face / @page: the block holds bare declarations with no selector wrapper
             for piece in &pieces {
-                // `(reference)` 体顶层的注释是被屏蔽的节点，less 直接丢弃
+                // Comments at the top level of a `(reference)` body are masked nodes and are dropped by less
                 if self.hidden && matches!(piece, Piece::Comment(_)) {
                     continue;
                 }
@@ -325,8 +328,8 @@ impl<'a> Compiler<'a> {
                 layer.decls.push(item);
             }
         } else if !pieces.is_empty() && !head.sels.is_empty() {
-            // 选择器每行一个 `(String, Span)`：行文本逐字节等于 `a,\nb` 形态，
-            // 续行的缩进与换行由 `doc::print` 按 `Style` 补。
+            // One `(String, Span)` per selector line: the line text is byte-for-byte the `a,\nb` form,
+            // and `doc::print` adds the indentation and newline of continuation lines according to `Style`.
             let selector = head
                 .sels
                 .iter()
@@ -354,7 +357,7 @@ impl<'a> Compiler<'a> {
             }));
         }
 
-        // pass 4：子规则。根块里 `@charset` / `@import` 要先提出来（less `ruleset.genCSS` 的重排）。
+        // pass 4: child rules. At the root block `@charset` / `@import` are hoisted first (less `ruleset.genCSS` reordering).
         if head.root {
             for child in &children {
                 if let Child::AtRule(at) = child.child
@@ -363,8 +366,8 @@ impl<'a> Compiler<'a> {
                     self.emit_child_at(at, child, level, head.sels, head.spans, layer)?;
                 }
             }
-            // less 把根层 `@import` 提到所有其它节点之前（`importNodeIndex`），
-            // 但让位于它之前的注释。
+            // less hoists root-level `@import` before all other nodes (`importNodeIndex`),
+            // but leaves comments preceding it in place.
             let front_limit = children
                 .iter()
                 .find_map(|c| match c.child {
@@ -426,8 +429,8 @@ impl<'a> Compiler<'a> {
         Ok(())
     }
 
-    /// `(reference)` 导入体的输出：内容照常展开（规则登记为不可见），
-    /// 被 extend 命中的规则在收尾时以扩展者选择器输出，其余整块删掉。
+    /// Output of a `(reference)` import body: content expands as usual (rules are registered invisible);
+    /// rules hit by an extend are emitted at the end under the extender's selector, and the rest of the block is removed.
     pub(super) fn emit_reference(
         &mut self,
         block: &'a SimpleBlock<'a>,
@@ -439,7 +442,7 @@ impl<'a> Compiler<'a> {
         let start = layer.items.len();
         let saved = self.hidden;
         self.hidden = true;
-        // 导入体顶层的注释是「被屏蔽的节点」：less 丢弃，且不能从根层漏出来
+        // Comments at the top level of the import body are "masked nodes": less drops them and they must not leak from the root level
         self.own_comments(block.span, &block.statements);
         let result = self.emit_block(
             &block.statements,
@@ -460,8 +463,8 @@ impl<'a> Compiler<'a> {
         result
     }
 
-    /// 根层裸函数调用：求值后整行输出（`e('…');` 输出内文）。
-    /// 内文是随意的 CSS 文本，无法拆解成 IR 节点，只落 `Raw`（映射指向整个调用）。
+    /// Root-level bare function call: evaluated and emitted as a whole line (`e('…');` emits the inner text).
+    /// The inner text is arbitrary CSS text that cannot be decomposed into IR nodes, so it becomes a `Raw` (mapping to the whole call).
     pub(super) fn emit_other(&mut self, f: &'a Function<'a>, layer: &mut Layer) {
         let text = value::eval_function_stmt(f, self.src, &self.env, 0);
         layer.items.push(Item::Raw(crate::doc::Raw {
@@ -470,18 +473,18 @@ impl<'a> Compiler<'a> {
         }));
     }
 
-    /// `@{name}` / `${prop}` 插值替换。
+    /// `@{name}` / `${prop}` interpolation substitution.
     pub(super) fn interpolate(&self, text: &str) -> String {
         value::interpolate(text, self.src, &self.env, 0, None)
     }
 
-    /// 带源位置的插值：未定义变量要按 less 报错（属性名/选择器/extend 等真正求值处）。
+    /// Interpolation with a source span: undefined variables must be reported as less does (at property names/selectors/extends and other real evaluation sites).
     pub(super) fn interpolate_at(&self, text: &str, span: Span) -> String {
         value::interpolate(text, self.src, &self.env, 0, Some(span))
     }
 
-    /// 属性名（已插值，含 IE `*` hack 前缀/后缀）。
-    /// 静默版：合并/去重/`$prop` 比对时调用，此时注入作用域未必就位。
+    /// Property name (interpolated, including the IE `*` hack prefix/suffix).
+    /// Silent version: called during merging/deduplication/`$prop` comparison, when the injection scope may not be in place yet.
     pub(super) fn prop_name(&self, d: &Declaration) -> String {
         let name = self.interpolate(self.slice(*d.name.span()));
         self.prop_name_with(d, name)
@@ -499,21 +502,21 @@ impl<'a> Compiler<'a> {
     }
 }
 
-/// 一条已输出的规则头（选择器列表 + 选项）。
+/// The header of an emitted rule (selector list + options).
 pub(super) struct Head<'s> {
     sels: &'s [Sel],
-    /// 与 `sels` 等长：每条选择器在源里的区间（空：at-rule 透传/生成的选择器）
+    /// Same length as `sels`: source span of each selector (empty: at-rule passthrough/generated selectors)
     spans: &'s [Span],
-    /// 每条选择器自己挂的 `:extend(...)`（与 `sels` 等长）
+    /// The `:extend(...)` attached to each selector (same length as `sels`)
     extends: Vec<Vec<Need>>,
-    /// 最外层块：`@charset` / `@import` 要提到最前（less `ruleset.genCSS` 的重排）
+    /// The outermost block: `@charset` / `@import` are hoisted first (less `ruleset.genCSS` reordering)
     root: bool,
 }
 
-/// 一层的产出：子节点 `items` + （at-rule 体的）裸声明 `decls`。
+/// Output of one level: child `items` + bare `decls` (of an at-rule body).
 ///
-/// `path` 是这一层在整棵树里的位置（祖先 `items` 下标），`(reference)` 剪枝按它
-/// 回到对应的子项区间。非 at-rule 体的层 `decls` 恒空。
+/// `path` is this level's position in the whole tree (indices of ancestor `items`); `(reference)` pruning uses it
+/// to return to the corresponding child range. `decls` is always empty for levels that are not at-rule bodies.
 #[derive(Default)]
 pub(super) struct Layer {
     path: Vec<usize>,
@@ -522,7 +525,7 @@ pub(super) struct Layer {
 }
 
 impl Layer {
-    /// 第 `index` 个子项的体层。
+    /// The body level of the `index`-th child item.
     fn child(&self, index: usize) -> Layer {
         let mut path = self.path.clone();
         path.push(index);
@@ -533,9 +536,9 @@ impl Layer {
         }
     }
 
-    /// 体：正常是 `Decls`；at-rule 体里同时有声明与子规则时（`@media screen { color: red;
-    /// .a {…} }`），`Body` 的单一形态表达不了「先声明、后子规则」，所以声明整段按当前层
-    /// 缩进拼成一块 `Raw` 放在子规则之前（已对 lessc 4.1.3 实测逐字节一致）。
+    /// Body: normally `Decls`; when an at-rule body has both declarations and child rules (`@media screen { color: red;
+    /// .a {…} }`), the single shape of `Body` cannot express "declarations first, then child rules", so the whole declarations section
+    /// is joined into one `Raw` with the current level's indentation and placed before the child rules (verified byte-for-byte against lessc 4.1.3).
     fn into_body(self, level: usize) -> Body {
         if self.items.is_empty() {
             return Body::Decls(self.decls);
@@ -564,20 +567,20 @@ impl Layer {
 
 enum Child<'a> {
     Rule(&'a QualifiedRule<'a>),
-    /// 带 guard 的规则（`.a when (...)`）
+    /// A rule with a guard (`.a when (...)`)
     CondRule(&'a LessConditionalQualifiedRule<'a>),
     AtRule(&'a AtRule<'a>),
-    /// `@keyframes` 体里的 `0%` / `from` 块
+    /// A `0%` / `from` block inside an `@keyframes` body
     Keyframe(&'a KeyframeBlock<'a>),
-    /// 根层裸函数调用（`e('text');`）
+    /// A root-level bare function call (`e('text');`)
     Other(&'a Function<'a>),
-    /// `(reference)` 导入体：内容照常展开但默认不输出（被 extend 命中才输出）
+    /// A `(reference)` import body: content expands as usual but is not emitted by default (only emitted when hit by an extend)
     Ref(&'a SimpleBlock<'a>),
 }
 
-/// extend 回写：把可见选择器换回 IR 的选择器行（每行带自己的源锚点）。
+/// extend write-back: replaces the selectors with the IR selector lines for the visible ones (each line carries its own source anchor).
 ///
-/// 不可见的规则只打 `placeholder`（`doc::print` 跳过它），不再事后剪文本。
+/// Invisible rules are only marked `placeholder` (`doc::print` skips them); no text pruning afterwards.
 fn rewrite(items: &mut [Item], engine: &extend::Engine) {
     for item in items.iter_mut() {
         match item {
@@ -611,7 +614,7 @@ fn rewrite(items: &mut [Item], engine: &extend::Engine) {
     }
 }
 
-/// 丢掉占位符规则（优先于打印，保证空 `@media` 一并消失）。
+/// Drops placeholder rules (before printing, so empty `@media` blocks disappear too).
 fn drop_placeholders(items: &mut Vec<Item>) {
     items.retain(|item| !matches!(item, Item::Rule(rule) if rule.placeholder));
     for item in items.iter_mut() {
@@ -623,10 +626,10 @@ fn drop_placeholders(items: &mut Vec<Item>) {
     }
 }
 
-/// `(reference)` 剪枝：区间里一条可见规则都没有时整段删除。
+/// `(reference)` pruning: removes the whole range when it contains no visible rule.
 ///
-/// 区间用建树时的「层路径 + 子项下标」记录（等价于改动前的输出字节区间），
-/// 嵌套 `@media` 是冒泡到壳外的兄弟节点，所以不会被误算成壳的内容。
+/// Ranges are recorded as "level path + child index" at tree construction (equivalent to the output byte ranges used before),
+/// and a nested `@media` is a sibling bubbled outside the shell, so it is not miscounted as part of the shell.
 fn prune(
     items: &mut Vec<Item>,
     path: &mut Vec<usize>,
@@ -646,7 +649,7 @@ fn prune(
         .filter(|(p, _, _)| p.as_slice() == path.as_slice())
         .map(|&(_, start, end)| (start, end))
         .collect();
-    // 从后往前删，前面的下标不失效。
+    // Remove from the back so earlier indices stay valid.
     mine.sort_unstable_by_key(|(start, _)| std::cmp::Reverse(*start));
     for (start, end) in mine {
         if start < end && end <= items.len() && !items[start..end].iter().any(has_visible_rule) {
@@ -655,10 +658,10 @@ fn prune(
     }
 }
 
-/// `(reference)` 剪枝的保留判据：区间里是否有会产出字节的规则。
+/// Retention test for `(reference)` pruning: whether the range has a rule that produces bytes.
 ///
-/// 注释、`Raw`（根层函数调用/裸注释）、`@import` 这类无体 at-rule 与只含声明的
-/// 隐藏 at-rule（`(reference)` 里的 `@font-face`）都不算——与改动前按可见规则判定一致。
+/// Comments, `Raw` (root-level function calls/bare comments), bodyless at-rules such as `@import`, and
+/// hidden at-rules containing only declarations (`@font-face` inside `(reference)`) do not count — matching the previous visible-rule test.
 fn has_visible_rule(item: &Item) -> bool {
     match item {
         Item::Rule(rule) => !rule.placeholder,
@@ -671,7 +674,7 @@ fn has_visible_rule(item: &Item) -> bool {
     }
 }
 
-/// 一条声明的序列化文本（`Raw` 落点用，与 `doc::print` 的形态一致）。
+/// Serialized text of one declaration (for `Raw` placement, matching the form produced by `doc::print`).
 fn decl_text(item: &DeclItem) -> String {
     match item {
         DeclItem::Decl(decl) => match decl.custom {

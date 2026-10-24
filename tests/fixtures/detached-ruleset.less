@@ -1,4 +1,4 @@
-// detached ruleset：定义 / 调用 / 传参 / 作用域
+// detached rulesets: definition / call / argument passing / scope
 @dr: {
   color: red;
   .inner { x: 1; }
@@ -6,7 +6,7 @@
 
 .a { @dr(); }
 
-// 调用处的变量可见
+// variables at the call site are visible
 @outer: caller;
 
 .b {
@@ -18,7 +18,7 @@
   @dr2();
 }
 
-// 调用方变量遮蔽定义处变量（less 实测：调用方优先）
+// caller variables shadow definition-site variables (verified with less: the caller wins)
 @closed: definition;
 @dr3: { closed: @closed; };
 .c {
@@ -26,7 +26,7 @@
   @dr3();
 }
 
-// 作为 mixin 参数传入，并在媒体块内展开
+// passed as a mixin argument and expanded inside a media block
 .wrap(@rules) {
   @media screen {
     @rules();
@@ -36,7 +36,7 @@
   .wrap({ media-inside: yes; });
 }
 
-// 参数默认值也是 detached ruleset
+// a parameter default can be a detached ruleset too
 .m(@a: {}; @b: {default: works;}) {
   @a();
   @b();
@@ -46,7 +46,7 @@
   .m({direct: works;}; @b: {named: works;});
 }
 
-// 块内声明后调用
+// call after declaring inside the block
 .f {
   @rules-2: {
     b: 1;

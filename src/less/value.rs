@@ -1,51 +1,51 @@
-//! 值求值：变量替换、四则运算、颜色与内置函数。
+//! Value evaluation: variable substitution, arithmetic, colors, and built-in functions.
 //!
-//! 对拍基线是 less@4.1.3（`math: parens-division` 默认）：`/` 在被括号包裹时才计算，
-//! 否则原样输出；`*` `+` `-` 总是计算。
+//! The conformance baseline is less@4.1.3 (default `math: parens-division`): `/` is computed only when wrapped in parentheses,
+//! otherwise it is emitted as-is; `*` `+` `-` are always computed.
 
 use std::path::{Path, PathBuf};
 
 use oxc_css_parser::ast::*;
 
-/// 变量绑定：AST 节点（源文件内）、文本（globalVars）或颜色。
+/// Variable binding: an AST node (inside the source file), text (globalVars), or a color.
 ///
-/// 颜色单独成一类：less 的变量的值就是 Color 对象，`darken(@c, 10%)` 用的是浮点通道，
-/// 若先写成 `#rrggbb` 再解析会丢掉亚整数部分（`#286090` 会变成 `#285f8f`）。
+/// Colors are a separate kind: in less a variable's value is a Color object, and `darken(@c, 10%)` uses the floating-point channel,
+/// so writing it as `#rrggbb` and parsing it again would lose the fractional part (`#286090` would become `#285f8f`).
 #[derive(Clone)]
 pub(crate) enum VarRef<'a> {
     Ast(&'a ComponentValue<'a>),
     Text(String),
-    /// 列表值（`@arguments`：实参之间的分组必须保留，`length`/`extract` 依赖它）。
+    /// A list value (`@arguments`: the grouping between arguments must be preserved, `length`/`extract` rely on it).
     List(Vec<String>),
     Color(Color),
-    /// detached ruleset 或作为规则集使用的 mixin 调用结果（`@dr()` / `@p[key]`）。
+    /// A detached ruleset, or the result of a mixin call used as a ruleset (`@dr()` / `@p[key]`).
     Ruleset(std::rc::Rc<crate::less::RuleSet<'a>>),
 }
 
-/// 属性查找结果：单条声明，或 `+:` / `+_:` 合并后的分组值。
+/// Property lookup result: a single declaration, or the grouped values after `+:` / `+_:` merging.
 #[derive(Clone)]
 pub(crate) enum PropSource<'a> {
     Decl(&'a Declaration<'a>),
-    /// 外层逗号分组、内层空格分隔（less `_mergeRules` 的产物）。
+    /// Comma groups on the outside, space separation within (the product of less `_mergeRules`).
     Merged(Vec<Vec<&'a Declaration<'a>>>),
 }
 
-/// 变量/属性查找（作用域链由调用方实现）。
+/// Variable/property lookup (the scope chain is provided by the caller).
 pub(crate) trait Scope<'a> {
     fn var(&self, name: &str) -> Option<VarRef<'a>>;
     fn prop(&self, name: &str) -> Option<Vec<PropSource<'a>>>;
-    /// 变量声明值末尾的块注释：less 把注释当值节点，引用处要带出来。
+    /// Block comment trailing a variable declaration's value: less treats comments as value nodes, so it must be brought out at references.
     fn var_suffix(&self, _name: &str) -> Option<String> {
         None
     }
-    /// `$prop` 没有命中：less 报 `Property '$prop' is undefined`，调用方据此记录错误。
+    /// `$prop` did not match: less reports `Property '$prop' is undefined`, and the caller records the error accordingly.
     fn prop_miss(&self, _name: &str, _span: oxc_css_parser::pos::Span) {}
-    /// `@var` 没有命中：less 报 `variable @var is undefined`。
+    /// `@var` did not match: less reports `variable @var is undefined`.
     ///
-    /// 只在真正求值的引用处调用：`isdefined(@x)`、未展开的 detached ruleset 等探测场景
-    /// 直接把 span 传 `None`，不产生错误。
+    /// Only called at references that are genuinely evaluated: probe cases such as `isdefined(@x)` and unexpanded detached rulesets
+    /// pass `None` as the span and produce no error.
     fn var_miss(&self, _name: &str, _span: oxc_css_parser::pos::Span) {}
-    /// 文件类函数（`data-uri` / `image-size`）的查找根：入口 less 文件目录 + `paths`。
+    /// Lookup root for file functions (`data-uri` / `image-size`): the entry less file's directory plus `paths`.
     fn file_roots(&self) -> Option<(&Path, &[PathBuf])> {
         None
     }
@@ -64,7 +64,7 @@ fn text_of(span: oxc_css_parser::pos::Span, src: &str) -> &str {
     }
 }
 
-/// 未命中变量的占位文本：按需记录 `variable @name is undefined`。
+/// Placeholder text for an unmatched variable: records `variable @name is undefined` on demand.
 fn undefined_var<'a>(
     name: &str,
     scope: &dyn Scope<'a>,
@@ -76,12 +76,12 @@ fn undefined_var<'a>(
     format!("@{name}")
 }
 
-/// `isdefined(expr)`：less 的 `isdefined` 关闭实参求值，求值失败即 false。
+/// `isdefined(expr)`: less's `isdefined` disables argument evaluation, and a failed evaluation means false.
 pub(crate) fn probe_defined<'a>(cv: &ComponentValue<'a>, scope: &dyn Scope<'a>) -> bool {
     match cv {
         ComponentValue::LessVariable(v) => scope.var(v.name.name).is_some(),
         ComponentValue::LessVariableCall(c) => scope.var(c.variable.name.name).is_some(),
-        // `@x[...]`：先确认变量存在，再管查找结果
+        // `@x[...]`: confirm the variable exists first, then worry about the lookup result
         ComponentValue::LessNamespaceValue(ns) => match &ns.callee {
             LessNamespaceValueCallee::LessVariable(v) => scope.var(v.name.name).is_some(),
             LessNamespaceValueCallee::LessMixinCall(_) => true,
@@ -90,7 +90,7 @@ pub(crate) fn probe_defined<'a>(cv: &ComponentValue<'a>, scope: &dyn Scope<'a>) 
     }
 }
 
-/// `isruleset(expr)`：`expr` 是不是 detached ruleset（变量指向它也算）。
+/// `isruleset(expr)`: whether `expr` is a detached ruleset (a variable pointing at one counts too).
 pub(crate) fn probe_ruleset<'a>(cv: &ComponentValue<'a>, scope: &dyn Scope<'a>) -> bool {
     match cv {
         ComponentValue::LessDetachedRuleset(_) => true,
@@ -116,7 +116,7 @@ pub(crate) fn eval<'a>(
         return text(src, cv).to_string();
     }
     match cv {
-        // 数值一律按源文本重新解析成 f64：AST 里的 f32 会丢精度（0.7 → 0.69999999）
+        // Numbers are always re-parsed from the source text into f64: f32 in the AST loses precision (0.7 -> 0.69999999)
         ComponentValue::Number(_) => {
             fmt_number(parse_number(text(src, cv)).map(|(v, _)| v).unwrap_or(0.0))
         }
@@ -139,7 +139,7 @@ pub(crate) fn eval<'a>(
         ComponentValue::LessVariableCall(call) => {
             var_value(call.variable.name.name, src, scope, depth, Some(*cv.span()))
         }
-        // `@@b`：先求 @b 的值作为变量名，再查 @<值>
+        // `@@b`: first evaluate @b as the variable name, then look up @<value>
         ComponentValue::LessVariableVariable(vv) => {
             let inner = var_name(
                 vv.variable.name.name,
@@ -157,7 +157,7 @@ pub(crate) fn eval<'a>(
                 None => undefined_var(&inner, scope, Some(*cv.span())),
             }
         }
-        // `$prop`：同作用域（含外层规则）里同名属性的值
+        // `$prop`: the value of a same-named property in the same scope (including outer rules)
         ComponentValue::LessPropertyVariable(p) => {
             match prop_text(p.name.name, src, scope, depth) {
                 Some(text) => text,
@@ -168,13 +168,13 @@ pub(crate) fn eval<'a>(
             }
         }
         ComponentValue::LessBinaryOperation(op) => eval_binary(op, src, scope, depth),
-        // math=parens-division：括号内的除法要算，括号外原样保留
+        // math=parens-division: division inside parentheses is computed, outside it is kept as-is
         ComponentValue::LessParenthesizedOperation(p) => {
             eval_paren(&p.operation, src, scope, depth + 1)
         }
-        // `~"..."` → 去掉 ~ 与引号，字符串内仍做 `@{}` / `${}` 插值
+        // `~"..."` -> drop the ~ and the quotes; `@{}` / `${}` interpolation still happens inside the string
         ComponentValue::LessEscapedStr(_) => {
-            // 取源文本以保留转义（`~"\9"` 里的 `\9` 不能被解码成制表符）
+            // Take the source text to preserve escapes (`\9` in `~"\9"` must not be decoded into a tab)
             let raw = text(src, cv);
             let inner = raw.strip_prefix('~').unwrap_or(raw);
             interpolate(unquote_ref(inner), src, scope, depth, Some(*cv.span()))
@@ -198,8 +198,8 @@ pub(crate) fn eval<'a>(
             .collect(),
         ComponentValue::Function(f) => eval_function(f, src, scope, depth),
         ComponentValue::LessList(list) => {
-            // 纯 token 序列（less 的匿名值，如 `(min-width: 768px) and (...)`）按源文本
-            // 原样输出：逐 token 拼接会插入多余空格，也可能破坏 `1 ,2` 这类写法
+            // A pure token sequence (a less anonymous value such as `(min-width: 768px) and (...)`) is taken from the source text
+            // and emitted as-is: joining token by token would insert extra spaces and could break forms like `1 ,2`
             if list
                 .elements
                 .iter()
@@ -207,8 +207,8 @@ pub(crate) fn eval<'a>(
             {
                 return substitute(text(src, cv), src, scope, depth, Some(*cv.span()));
             }
-            // 有无逗号分隔符决定拼接方式（space list 用空格）；`/` 这类定界符两侧不留空格
-            // （less 把它解析成 Operation，genCSS 只在 isSpaced 时加空格）
+            // Whether a comma separator exists decides the joining (space lists use spaces); delimiters such as `/` get no spaces on either side
+            // (less parses it as an Operation, and genCSS only adds spaces when isSpaced)
             let sep = if list.comma_spans.is_some() {
                 ", "
             } else {
@@ -236,7 +236,7 @@ pub(crate) fn eval<'a>(
     }
 }
 
-/// 变量取值（未定义时保留 `@name` 并记录错误）。
+/// Variable value (keeps `@name` and records an error when undefined).
 fn var_value<'a>(
     name: &str,
     src: &'a str,
@@ -258,7 +258,7 @@ fn var_value<'a>(
     }
 }
 
-/// 变量作为名字使用时的文本：字符串取内容（去引号），其余按值求值。
+/// Text of a variable used as a name: strings yield their content (unquoted), everything else is evaluated as a value.
 pub(crate) fn var_name<'a>(
     name: &str,
     src: &'a str,
@@ -281,7 +281,7 @@ pub(crate) fn var_name<'a>(
     }
 }
 
-/// 插值用文本：quoted 变量取引号内的内容，其余取求值结果的 CSS 文本。
+/// Text for interpolation: quoted variables yield the content inside the quotes, others the CSS text of the evaluated result.
 fn text_value<'a>(
     node: &'a ComponentValue<'a>,
     src: &'a str,
@@ -294,7 +294,7 @@ fn text_value<'a>(
     }
 }
 
-/// 插值里的变量替换（未定义时原样保留）。
+/// Variable substitution inside interpolation (kept as-is when undefined).
 fn interp_var<'a>(
     name: &str,
     src: &'a str,
@@ -302,7 +302,7 @@ fn interp_var<'a>(
     depth: usize,
     span: Option<oxc_css_parser::pos::Span>,
 ) -> String {
-    // 变量名本身可以带插值（`@{box-@{suffix}}`）
+    // The variable name itself may contain interpolation (`@{box-@{suffix}}`)
     let resolved = if name.contains("@{") {
         interpolate(name, src, scope, depth, span)
     } else {
@@ -326,8 +326,8 @@ fn interp_var<'a>(
     }
 }
 
-/// `@{}` 内是普通变量名（less 的名字插值正则只认 `[\w-]`）。
-/// `@{paths[dir]}` 这类在 less 4.1.3 里当原文输出（permissive 上下文不求值），不报未定义。
+/// Inside `@{}` is an ordinary variable name (less's name interpolation regex only accepts `[\w-]`).
+/// Forms like `@{paths[dir]}` are emitted as raw text in less 4.1.3 (permissive contexts are not evaluated) and do not report undefined.
 fn plain_var_name(name: &str) -> bool {
     !name.is_empty()
         && name
@@ -335,7 +335,7 @@ fn plain_var_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-/// 选择器/属性名里的插值：值原样嵌入（quoted 值的引号保留，同 less）。
+/// Interpolation in selectors/property names: the value is embedded as-is (quotes of a quoted value are kept, as in less).
 fn interp_var_raw<'a>(
     name: &str,
     src: &'a str,
@@ -352,7 +352,7 @@ fn interp_var_raw<'a>(
         return format!("@{{{name}}}");
     }
     let text = match scope.var(&resolved) {
-        // 名字/选择器插值发生在 less 的 eval 阶段：数值此处不按 numPrecision 截断
+        // Name/selector interpolation happens in less's eval phase: numbers are not truncated by numPrecision here
         Some(VarRef::Ast(node)) => precise(|| eval(node, src, scope, depth + 1)),
         Some(VarRef::List(v)) => v.join(" "),
         Some(VarRef::Text(t)) => t,
@@ -371,7 +371,7 @@ fn interp_var_raw<'a>(
     }
 }
 
-/// `"a@{n}b"` 这类插值字符串：静态片段保留原文（含引号），变量/属性处替换。
+/// Interpolated strings such as `"a@{n}b"`: static parts keep their source text (including quotes), variables/properties are substituted.
 fn interpolated_str<'a>(
     elements: &[LessInterpolatedStrElement<'a>],
     src: &'a str,
@@ -379,7 +379,7 @@ fn interpolated_str<'a>(
     depth: usize,
     span: oxc_css_parser::pos::Span,
 ) -> String {
-    // 元素替换后还要再插值一遍：`"@{box-@{suffix}}"` 会先拼成 `@{box-large}`
+    // After element substitution the text is interpolated again: `"@{box-@{suffix}}"` first becomes `@{box-large}`
     let joined: String = elements
         .iter()
         .map(|e| match e {
@@ -394,9 +394,9 @@ fn interpolated_str<'a>(
     interpolate(&joined, src, scope, depth, Some(span))
 }
 
-/// `@{name}` / `${prop}` 文本插值（选择器、属性名也用这一套）。
+/// `@{name}` / `${prop}` text interpolation (also used for selectors and property names).
 ///
-/// less 的 `Quoted.eval` 会反复替换直到不再变化，这里同样循环，但限次防死循环。
+/// less's `Quoted.eval` substitutes repeatedly until nothing changes; this loops the same way, with a limit against infinite loops.
 pub(crate) fn interpolate<'a>(
     text: &str,
     src: &'a str,
@@ -430,13 +430,13 @@ fn interpolate_once<'a>(
     while let Some((pos, is_prop)) = next_marker(rest) {
         out.push_str(&rest[..pos]);
         let after = &rest[pos + 2..];
-        // 名字里可以再嵌套 `@{}`（`@{box-@{suffix}}`）：从内向外配对括号
+        // Names may nest `@{}` (`@{box-@{suffix}}`): pair brackets from the inside out
         let Some(end) = matching_brace(after) else {
             out.push_str(&rest[pos..]);
             return out;
         };
         let name = &after[..end];
-        // 引号状态要看整串前缀：插入的值会改变 rest 的起点（`"a@{x}@{y}"`）
+        // Quote state must consider the whole prefix: inserted values shift the start of rest (`"a@{x}@{y}"`)
         let abs = text.len() - rest.len() + pos;
         let quoted = inside_quotes(&text[..abs]);
         out.push_str(&if is_prop {
@@ -452,7 +452,7 @@ fn interpolate_once<'a>(
     out
 }
 
-/// `@{` 之后到匹配 `}` 的下标（考虑嵌套的 `@{`）。
+/// Index after `@{` up to the matching `}` (accounting for nested `@{`).
 fn matching_brace(text: &str) -> Option<usize> {
     let mut depth = 0usize;
     for (i, ch) in text.char_indices() {
@@ -466,7 +466,7 @@ fn matching_brace(text: &str) -> Option<usize> {
     None
 }
 
-/// 位置 `pos` 是否落在引号字符串内部（跳过转义）。
+/// Whether position `pos` lies inside a quoted string (skipping escapes).
 fn inside_quotes(text: &str) -> bool {
     let mut quote = None;
     let mut escaped = false;
@@ -488,7 +488,7 @@ fn inside_quotes(text: &str) -> bool {
     quote.is_some()
 }
 
-/// 返回最早的插值标记位置与它是不是 `${prop}`。
+/// Returns the earliest interpolation marker position and whether it is `${prop}`.
 fn next_marker(text: &str) -> Option<(usize, bool)> {
     match (text.find("@{"), text.find("${")) {
         (Some(a), Some(b)) if a <= b => Some((a, false)),
@@ -499,7 +499,7 @@ fn next_marker(text: &str) -> Option<(usize, bool)> {
     }
 }
 
-/// 前一个字符是标识符的一部分时，`@` 不是变量引用（`url(user@example.com)`）。
+/// When the preceding character is part of an identifier, `@` is not a variable reference (`url(user@example.com)`).
 fn after_ident(prefix: &str) -> bool {
     prefix
         .chars()
@@ -507,7 +507,7 @@ fn after_ident(prefix: &str) -> bool {
         .is_some_and(|c| c.is_ascii_alphanumeric() || matches!(c, '_' | '.'))
 }
 
-/// `@x` 是否处在 `[...]` 查找名里：less 把它当命名空间查找的名字，不是变量引用。
+/// Whether `@x` sits inside a `[...]` lookup name: less treats it as a namespace lookup name, not a variable reference.
 fn inside_lookup(prefix: &str) -> bool {
     let (mut depth, mut quote) = (0i32, None);
     for c in prefix.chars() {
@@ -525,10 +525,10 @@ fn inside_lookup(prefix: &str) -> bool {
     depth > 0
 }
 
-/// `@name` / `@{name}` 文本替换：at-rule prelude、`url()` 内部用。
+/// `@name` / `@{name}` text substitution: used for at-rule preludes and inside `url()`.
 ///
-/// 与选择器插值不同，`@name` 保留值的引号（`url(@p)` → `url("a.png")`）。
-/// 引号内与标识符中间的 `@` 不是变量引用（less 把它们当普通文本），不报错。
+/// Unlike selector interpolation, `@name` keeps the value's quotes (`url(@p)` -> `url("a.png")`).
+/// An `@` inside quotes or in the middle of an identifier is not a variable reference (less treats it as plain text) and reports no error.
 pub(crate) fn substitute<'a>(
     text: &str,
     src: &'a str,
@@ -579,7 +579,7 @@ pub(crate) fn substitute<'a>(
     out
 }
 
-/// `url(...)`：内部文本按 less 求值（插值/变量），`data:` 等裸值原样保留。
+/// `url(...)`: the inner text is evaluated as less does (interpolation/variables); bare values such as `data:` are kept as-is.
 fn eval_url<'a>(
     u: &Url<'a>,
     src: &'a str,
@@ -602,7 +602,7 @@ fn eval_url<'a>(
     )
 }
 
-/// 属性值文本：命中则返回（合并过的）值，未定义返回 None。
+/// Property value text: returns the (merged) value on a hit, None when undefined.
 fn prop_text<'a>(name: &str, src: &'a str, scope: &dyn Scope<'a>, depth: usize) -> Option<String> {
     let last = scope.prop(name)?.pop()?;
     Some(match last {
@@ -620,7 +620,7 @@ fn prop_text<'a>(name: &str, src: &'a str, scope: &dyn Scope<'a>, depth: usize) 
     })
 }
 
-/// less 的 `$prop` 会把源声明的 `!important` 带到引用处。
+/// less's `$prop` carries the source declaration's `!important` to the reference site.
 fn with_important(text: String, d: &Declaration) -> String {
     if d.important.is_some() {
         format!("{text} !important")
@@ -629,7 +629,7 @@ fn with_important(text: String, d: &Declaration) -> String {
     }
 }
 
-/// 声明的整条值：段间空白归一为单个空格（less `Expression` 的拼接方式）。
+/// A declaration's whole value: whitespace between segments normalized to a single space (less `Expression`'s joining).
 pub(crate) fn eval_values<'a>(
     values: &[ComponentValue<'a>],
     src: &'a str,
@@ -639,7 +639,7 @@ pub(crate) fn eval_values<'a>(
     join_seq(values, src, scope, depth)
 }
 
-/// 值/参数序列拼接：段的空白归一为单个空格，逗号归一为 `, `。
+/// Joining of a value/argument sequence: whitespace between segments normalized to a single space and commas to `, `.
 fn join_seq<'a>(
     items: &[ComponentValue<'a>],
     src: &'a str,
@@ -659,7 +659,7 @@ fn join_seq<'a>(
         {
             let gap = &src[end..span.start];
             if gap.contains("/*") {
-                // 参里夹着的块注释是值节点（less `arguments()` 把 comment 当实体）
+                // A block comment between arguments is a value node (less `arguments()` treats a comment as an entity)
                 if !skip_gap {
                     out.push(' ');
                 }
@@ -686,8 +686,8 @@ fn join_seq<'a>(
     out
 }
 
-/// 括号内求值：除法在这里才计算（less 的 `math: parens-division`）。
-/// less 在括号内全量开 math，因此嵌套运算里的除法也要算。
+/// Evaluation inside parentheses: division is computed only here (less's `math: parens-division`).
+/// less turns math fully on inside parentheses, so divisions in nested operations are computed too.
 fn eval_paren<'a>(
     cv: &ComponentValue<'a>,
     src: &'a str,
@@ -699,7 +699,7 @@ fn eval_paren<'a>(
     }
     match cv {
         ComponentValue::LessBinaryOperation(op) => {
-            // 数值域直接算 f64：文本往返（8 位小数）会丢精度
+            // Compute f64 directly in the numeric domain: going through text (8 decimals) loses precision
             if let Some((v, u)) = number_in(cv, src, scope, depth + 1, true) {
                 return fmt_with_unit(v, u);
             }
@@ -710,7 +710,7 @@ fn eval_paren<'a>(
         ComponentValue::LessParenthesizedOperation(p) => {
             eval_paren(&p.operation, src, scope, depth + 1)
         }
-        // 括号内的变量引用按「math 开」求值：`(@b)` 里 `@b: 18 / 2` 要算成 9
+        // Variable references inside parentheses are evaluated with "math on": `@b: 18 / 2` in `(@b)` must compute to 9
         ComponentValue::LessVariable(v) => {
             paren_var(v.name.name, src, scope, depth, Some(*cv.span()))
         }
@@ -738,7 +738,7 @@ fn paren_var<'a>(
     }
 }
 
-/// 二元运算。
+/// Binary operations.
 fn eval_binary<'a>(
     op: &LessBinaryOperation<'a>,
     src: &'a str,
@@ -748,7 +748,7 @@ fn eval_binary<'a>(
     let left_text = eval(&op.left, src, scope, depth + 1);
     let right_text = eval(&op.right, src, scope, depth + 1);
 
-    // 除法默认不计算（math=parens-division），原样输出，保留运算符周边空白
+    // Division is not computed by default (math=parens-division) and is emitted as-is, keeping the whitespace around the operator
     if matches!(op.op.kind, LessOperationOperatorKind::Division) {
         let lo = op.left.span().end;
         let hi = op.right.span().start;
@@ -772,7 +772,7 @@ fn eval_binary<'a>(
         LessOperationOperatorKind::Multiply => "*",
         LessOperationOperatorKind::Division | LessOperationOperatorKind::DotDivision => "/",
     };
-    // less 的 `Operation.eval`：操作数不可运算（例如未求值的除法）时整棵运算原样保留
+    // less's `Operation.eval`: when an operand cannot be operated on (e.g. an unevaluated division), the whole operation is kept as-is
     let spaced = !gap.is_empty() && gap.starts_with(|c: char| c.is_whitespace());
     let fallback = if spaced {
         format!("{left_text} {op_text} {right_text}")
@@ -782,7 +782,7 @@ fn eval_binary<'a>(
     operate(&op.op.kind, &left_text, &right_text).unwrap_or(fallback)
 }
 
-/// 操作数：带单位的数，或颜色（less 里 Dimension 参与颜色运算时会转成灰度色）。
+/// Operand: a number with a unit, or a color (in less, a Dimension participating in color arithmetic becomes a grayscale color).
 #[derive(Clone)]
 enum Operand {
     Num(f64, Option<String>),
@@ -793,7 +793,7 @@ fn parse_operand(text: &str) -> Option<Operand> {
     if let Some(c) = parse_color(text) {
         return Some(Operand::Color(c));
     }
-    // 只接受「数值 + 单位」整体：`10px / 2` 的单位部分不是单位，不能当数值算
+    // Only accept "number + unit" as a whole: the unit part of `10px / 2` is not a unit and must not be computed as a number
     parse_number(text)
         .filter(|(_, u)| u.as_deref().is_none_or(is_unit_name))
         .map(|(v, u)| Operand::Num(v, u))
@@ -804,7 +804,7 @@ fn is_unit_name(unit: &str) -> bool {
         .all(|c| c.is_alphabetic() || c == '%' || c == '_')
 }
 
-/// 同组单位换算（less `Dimension.convertTo`）；不可换算时原样返回。
+/// Same-group unit conversion (less `Dimension.convertTo`); returns the input as-is when not convertible.
 fn convert_unit(value: f64, from: &str, to: &str) -> f64 {
     for (_, table) in UNIT_GROUPS {
         let f = table.iter().find(|(u, _)| *u == from).map(|(_, f)| *f);
@@ -816,7 +816,7 @@ fn convert_unit(value: f64, from: &str, to: &str) -> f64 {
     value
 }
 
-/// 两侧已是求值文本时的四则运算（命名空间查找结果参与运算用）。
+/// Arithmetic when both sides are already evaluated text (for namespace lookup results taking part in operations).
 pub(crate) fn arithmetic(
     kind: &LessOperationOperatorKind,
     left: &str,
@@ -829,7 +829,7 @@ fn operate(kind: &LessOperationOperatorKind, left: &str, right: &str) -> Option<
     match (parse_operand(left)?, parse_operand(right)?) {
         (Operand::Num(lv, lu), Operand::Num(rv, ru)) => {
             let (v, unit) = match *kind {
-                // less 的 +/-：结果单位取左；右单位可换算时先换算
+                // less's +/-: the result takes the left unit; the right side is converted first when convertible
                 LessOperationOperatorKind::Plus | LessOperationOperatorKind::Minus => {
                     let rv = match (lu.as_deref(), ru.as_deref()) {
                         (Some(l), Some(r)) => convert_unit(rv, r, l),
@@ -843,7 +843,7 @@ fn operate(kind: &LessOperationOperatorKind, left: &str, right: &str) -> Option<
         }
         (l, r) => {
             let (l, r) = (to_color(l), to_color(r));
-            // less Color.operate：alpha 走合成公式，与运算符无关
+            // less Color.operate: alpha follows the composition formula regardless of the operator
             let alpha = l.a * (1.0 - r.a) + r.a;
             Some(
                 Color {
@@ -870,7 +870,7 @@ fn arith(kind: &LessOperationOperatorKind, a: f64, b: f64) -> f64 {
 fn to_color(op: Operand) -> Color {
     match op {
         Operand::Color(c) => c,
-        // less Dimension.toColor：数值当灰度
+        // less Dimension.toColor: a number becomes a grayscale color
         Operand::Num(v, _) => Color {
             r: v,
             g: v,
@@ -880,7 +880,7 @@ fn to_color(op: Operand) -> Color {
     }
 }
 
-/// less `unit-conversions.js`：同组单位可换算。
+/// less `unit-conversions.js`: units within the same group are convertible.
 const UNIT_GROUPS: &[(&str, &[(&str, f64)])] = &[
     (
         "length",
@@ -915,7 +915,7 @@ pub(super) fn eval_function_text<'a>(
     eval_function(f, src, scope, depth)
 }
 
-/// 单位换算组：返回（组序号，到组基本单位的系数）。
+/// Unit conversion group: returns (group index, factor to the group's base unit).
 pub(super) fn unit_factor(unit: &str) -> Option<(usize, f64)> {
     (0..UNIT_GROUPS.len()).find_map(|g| {
         UNIT_GROUPS[g]
@@ -926,9 +926,9 @@ pub(super) fn unit_factor(unit: &str) -> Option<(usize, f64)> {
     })
 }
 
-/// 函数名与实参；`if`/`boolean` 的实参里有条件节点，必须单独求值（只算选中分支）。
-/// IE 滤镜函数的 `(路径, 括号内)`: `progid:DXImageTransform.Microsoft.f(x=1)` →
-/// `("progid:DXImageTransform.Microsoft.f", "x=1")`。
+/// Function name and arguments; `if`/`boolean` arguments contain condition nodes and must be evaluated separately (only the selected branch).
+/// The IE filter function's `(path, inside parentheses)`: `progid:DXImageTransform.Microsoft.f(x=1)` ->
+/// `("progid:DXImageTransform.Microsoft.f", "x=1")`.
 fn progid_parts<'a>(f: &Function<'a>, src: &'a str) -> Option<(&'a str, &'a str)> {
     let raw = src.get(f.span.start..f.span.end)?;
     let head = raw.get(..raw.find('(')?)?;
@@ -940,7 +940,7 @@ fn progid_parts<'a>(f: &Function<'a>, src: &'a str) -> Option<(&'a str, &'a str)
     Some((head, inner))
 }
 
-/// `key = value` → `key=value`（引号内不动）：less 的 `Assignment` 输出形态。
+/// `key = value` -> `key=value` (untouched inside quotes): less's `Assignment` output form.
 fn tighten_assignments(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut quote = None;
@@ -974,7 +974,7 @@ fn tighten_assignments(text: &str) -> String {
     out
 }
 
-/// 语句级函数调用（根层裸调用 `e('…');`）的求值入口。
+/// Evaluation entry for a statement-level function call (root-level bare call `e('…');`).
 pub(crate) fn eval_function_stmt<'a>(
     f: &'a Function<'a>,
     src: &'a str,
@@ -991,13 +991,13 @@ fn eval_function<'a>(
     depth: usize,
 ) -> String {
     let name = function_name(f);
-    // IE 滤镜 `progid:DXImageTransform.Microsoft.f(opacity = 20)`：less 把整段路径当函数名，
-    // 参数是 `key=value` 赋值（`Assignment` 输出 `key=value`，不留空格）。
+    // IE filter `progid:DXImageTransform.Microsoft.f(opacity = 20)`: less treats the whole path as the function name,
+    // and the arguments are `key=value` assignments (`Assignment` outputs `key=value` without spaces).
     if let Some((prefix, inner)) = progid_parts(f, src) {
         let inner = substitute(inner, src, scope, depth, Some(*f.span()));
         return format!("{prefix}({})", tighten_assignments(&inner));
     }
-    // 探测类函数直接看节点，不求值实参：`isdefined(@nope)` / `isruleset(@nope)` 不该报错。
+    // Probe functions inspect the node directly without evaluating arguments: `isdefined(@nope)` / `isruleset(@nope)` must not report errors.
     match name.as_str() {
         "isdefined" => {
             return is_css(f.args.first().is_some_and(|a| probe_defined(a, scope)));
@@ -1012,8 +1012,8 @@ fn eval_function<'a>(
             return out;
         }
     }
-    // 逗号在 AST 里是独立 Delimiter 节点，不是参数：按名取参时必须过滤，
-    // 否则 `lighten(#333, 10%)` 的 args[1] 会是逗号。
+    // A comma is a separate Delimiter node in the AST, not an argument: it must be filtered when taking arguments by position,
+    // otherwise args[1] of `lighten(#333, 10%)` would be the comma.
     let args: Vec<String> = f
         .args
         .iter()
@@ -1027,7 +1027,7 @@ fn eval_function<'a>(
         | "fadein" | "fadeout" | "mix" | "tint" | "shade" => color_function(f, src, scope, depth)
             .map(|c| c.to_css())
             .unwrap_or_else(|| format!("{name}({joined})")),
-        // `rgba(color)` / `rgba(color, alpha)`：参数是颜色时只覆盖 alpha（less `functions/color.js`）
+        // `rgba(color)` / `rgba(color, alpha)`: when the argument is a color only alpha is overridden (less `functions/color.js`)
         "rgba" | "rgb" | "hsl" | "hsla" => {
             let single = f
                 .args
@@ -1053,7 +1053,7 @@ fn eval_function<'a>(
                 }
             }
         }
-        // 颜色通道/属性（less `functions/color.js`）
+        // Color channels/properties (less `functions/color.js`)
         "red" | "green" | "blue" => {
             let c = parse_color(arg_at(&args, 0));
             let v = c.map(|c| match name.as_str() {
@@ -1101,7 +1101,7 @@ fn eval_function<'a>(
         }
         "round" | "ceil" | "floor" | "abs" => {
             let v = number_arg(&f.args, src, scope, depth);
-            // `round(n, precision)`：less 走 `toFixed`，小数位后转回数值
+            // `round(n, precision)`: less goes through `toFixed`, converting back to a number after the decimal places
             let digits =
                 number_arg_at(&f.args, 1, src, scope, depth).map(|(d, _)| d.max(0.0) as usize);
             match (v, name.as_str()) {
@@ -1112,7 +1112,7 @@ fn eval_function<'a>(
                 _ => format!("{name}({joined})"),
             }
         }
-        // ---- 列表（less `functions/list.js`）----
+        // ---- Lists (less `functions/list.js`) ----
         "length" => fmt_number(list_items(f, src, scope, depth).len() as f64),
         "extract" => {
             let items = list_items(f, src, scope, depth);
@@ -1122,7 +1122,7 @@ fn eval_function<'a>(
             }
         }
         "range" => range_list(f, src, scope, depth).unwrap_or_else(|| format!("{name}({joined})")),
-        // ---- 数学（less `functions/math.js`、`functions/number.js`）----
+        // ---- Math (less `functions/math.js`, `functions/number.js`) ----
         "pi" => fmt_number(std::f64::consts::PI),
         "sin" | "cos" | "tan" | "asin" | "acos" | "atan" => {
             math_fn(&name, f, src, scope, depth).unwrap_or_else(|| format!("{name}({joined})"))
@@ -1139,7 +1139,7 @@ fn eval_function<'a>(
             Some((_, u)) => u.unwrap_or_default(),
             None => format!("{name}({joined})"),
         },
-        // ---- 颜色通道与派生（less `functions/color.js`）----
+        // ---- Color channels and derivatives (less `functions/color.js`) ----
         "luma" | "luminance" => parse_color(arg_at(&args, 0))
             .map(|c| {
                 let v = match name.as_str() {
@@ -1172,8 +1172,8 @@ fn eval_function<'a>(
         "contrast" => parse_color(arg_at(&args, 0))
             .map(|c| contrast_color(c, &args))
             .unwrap_or_else(|| format!("{name}({joined})")),
-        // `color('#55FF5599')`：引号内的十六进制原样交回（保留大小写）；
-        // 颜色关键字则回落到 `#rrggbb`（less 把 Color 的 `value` 清空）
+        // `color('#55FF5599')`: a hex value inside quotes is handed back as-is (case preserved);
+        // color keywords fall back to `#rrggbb` (less clears the Color's `value`)
         "color" => {
             let a = arg_at(&args, 0);
             let inner = unquote(a);
@@ -1187,7 +1187,7 @@ fn eval_function<'a>(
                     .unwrap_or_else(|| format!("{name}({joined})")),
             }
         }
-        // 颜色混合（less `functions/color-blending.js`）
+        // Color blending (less `functions/color-blending.js`)
         "multiply" | "screen" | "overlay" | "softlight" | "hardlight" | "difference"
         | "exclusion" | "average" | "negation" => {
             let (Some(a), Some(b)) = (parse_color(arg_at(&args, 0)), parse_color(arg_at(&args, 1)))
@@ -1199,9 +1199,9 @@ fn eval_function<'a>(
         "replace" => {
             replace_fn(&f.args, src, scope, depth).unwrap_or_else(|| format!("{name}({joined})"))
         }
-        // `calc(...)`：内部不再做四则运算，只写回变量与函数结果
+        // `calc(...)`: no arithmetic inside, only variables and function results are written back
         "calc" => calc_text(f, src, scope, depth),
-        // 类型判断（less `functions/types.js`）
+        // Type checks (less `functions/types.js`)
         "isnumber" => is_css(parse_number(arg_at(&args, 0)).is_some()),
         "iscolor" => is_css(is_color_text(arg_at(&args, 0))),
         "isstring" => is_css({
@@ -1224,19 +1224,19 @@ fn eval_function<'a>(
             let unit = unit.trim_matches(['"', '\'']);
             unit_of(arg_at(&args, 0)).as_deref() == Some(unit) && !unit.is_empty()
         }),
-        // `e("...")`：去引号的匿名值（less `Anonymous`）
+        // `e("...")`: an anonymous value with the quotes removed (less `Anonymous`)
         "e" => args
             .first()
             .map(|a| a.trim_matches(['"', '\'']).to_string())
             .unwrap_or_default(),
-        // `%("format", args...)`：less `format`（`%s %d %a`）
+        // `%("format", args...)`: less `format` (`%s %d %a`)
         "%" => format_string(&args).unwrap_or_else(|| format!("{name}({joined})")),
-        // `escape(str)`：less `encodeURIComponent` + 额外转义 `= : # ; ( )`
+        // `escape(str)`: less `encodeURIComponent` plus extra escaping of `= : # ; ( )`
         "escape" => args
             .first()
             .map(|a| escape_url(&unquote(a)))
             .unwrap_or_else(|| format!("{name}({joined})")),
-        // 文件类函数：`data-uri` / `image-size` / `image-width` / `image-height`
+        // File functions: `data-uri` / `image-size` / `image-width` / `image-height`
         "data-uri" => {
             let args = arg_list(f, src, scope, depth);
             scope
@@ -1255,7 +1255,7 @@ fn eval_function<'a>(
             .unwrap_or_else(|| format!("{name}({joined})")),
         "svg-gradient" => super::file_fn::svg_gradient(&arg_list(f, src, scope, depth))
             .unwrap_or_else(|| format!("{name}({joined})")),
-        // 未知函数：保留原名与已求值参数
+        // Unknown function: keep the original name and the evaluated arguments
         _ => format!("{name}({joined})"),
     }
 }
@@ -1264,7 +1264,7 @@ fn arg_at(args: &[String], i: usize) -> &str {
     args.get(i).map(String::as_str).unwrap_or("")
 }
 
-/// `image-size` 家族：缺文件/格式不认识时 less 抛错，这里保留原调用文本。
+/// The `image-size` family: less throws when the file is missing or the format is unknown; here the original call text is kept.
 fn image_size<'a>(
     f: &Function<'a>,
     src: &'a str,
@@ -1275,8 +1275,8 @@ fn image_size<'a>(
     super::file_fn::image_size(dir, paths, arg_list(f, src, scope, depth).first()?)
 }
 
-/// 实参按 less 的 `parser.arguments` 分组（逗号分隔，组内空格分隔），但每组求值后
-/// 拼回一段文本：`svg-gradient(to bottom, black, white)` 的方向就是一组 `to bottom`。
+/// Arguments are grouped as less's `parser.arguments` does (comma-separated, space-separated within a group), but each group is joined
+/// back into one text after evaluation: the direction in `svg-gradient(to bottom, black, white)` is the single group `to bottom`.
 fn arg_list<'a>(
     f: &Function<'a>,
     src: &'a str,
@@ -1300,16 +1300,16 @@ fn unit_of(text: &str) -> Option<String> {
 }
 
 // ---------------------------------------------------------------------------
-// 列表函数（less `functions/list.js`）
+// List functions (less `functions/list.js`)
 // ---------------------------------------------------------------------------
 
-/// 实参分组：less 的 `parser.arguments`：含分号时只按分号切（逗号留在组内），
-/// 否则按逗号切；组内是空格分隔的值。
+/// Argument grouping: less's `parser.arguments`: when a semicolon is present only semicolons split (commas stay in the group),
+/// otherwise commas split; within a group values are space-separated.
 pub(super) fn arg_groups<'a, 'b>(
     args: &'b [ComponentValue<'a>],
 ) -> Vec<Vec<&'b ComponentValue<'a>>> {
-    // less：`each(10px 15px, 20px 25px; { ... })` 的第二个实参是规则集，
-    // 所以出现分号时逗号不再分隔实参
+    // less: the second argument of `each(10px 15px, 20px 25px; { ... })` is a ruleset,
+    // so once a semicolon appears commas no longer separate arguments
     let semi = args.iter().any(|a| {
         matches!(
             a,
@@ -1341,7 +1341,7 @@ fn fn_arg_groups<'a, 'b>(f: &'b Function<'a>) -> Vec<Vec<&'b ComponentValue<'a>>
     arg_groups(&f.args)
 }
 
-/// `length`/`extract` 的元素（less `getItemsFromNode`）：列表展开，其余算一个。
+/// Elements of `length`/`extract` (less `getItemsFromNode`): a list expands, anything else counts as one.
 fn list_items<'a>(
     f: &Function<'a>,
     src: &'a str,
@@ -1405,7 +1405,7 @@ fn var_items<'a>(name: &str, src: &'a str, scope: &dyn Scope<'a>, depth: usize) 
     }
 }
 
-/// 文本形态的列表（globalVars、变参绑定）：按顶层逗号分，再按顶层空白分。
+/// A list in text form (globalVars, variadic bindings): split at top-level commas, then at top-level whitespace.
 pub(super) fn split_items(text: &str) -> Vec<String> {
     let t = text.trim();
     if t.is_empty() {
@@ -1422,7 +1422,7 @@ pub(super) fn split_items(text: &str) -> Vec<String> {
     split_ws(t)
 }
 
-/// 顶层空白切分。
+/// Top-level whitespace splitting.
 pub(super) fn split_ws(text: &str) -> Vec<String> {
     let mut out = Vec::new();
     let mut cur = String::new();
@@ -1470,7 +1470,7 @@ pub(super) fn split_ws(text: &str) -> Vec<String> {
     out
 }
 
-/// `extract` 的下标（0 基）；非正整数下标 less 返回 undefined（调用原样输出）。
+/// Index for `extract` (0-based); less returns undefined for a non-positive-integer index (the call is emitted verbatim).
 fn extract_index<'a>(
     f: &Function<'a>,
     src: &'a str,
@@ -1483,7 +1483,7 @@ fn extract_index<'a>(
     (v >= 1.0 && v.fract() == 0.0 && v < 1e9).then(|| v as usize - 1)
 }
 
-/// `range(start, end, step)`：less 的 `functions/list.js`，输出空格列表。
+/// `range(start, end, step)`: less's `functions/list.js`, emitting a space-separated list.
 fn range_list<'a>(
     f: &Function<'a>,
     src: &'a str,
@@ -1519,10 +1519,10 @@ fn range_list<'a>(
 }
 
 // ---------------------------------------------------------------------------
-// 数学函数（less `functions/math.js`、`functions/number.js`）
+// Math functions (less `functions/math.js`, `functions/number.js`)
 // ---------------------------------------------------------------------------
 
-/// `Dimension.unify()`：长度 → px、时长 → s、角度 → rad（不可换算的单位保留）。
+/// `Dimension.unify()`: length -> px, duration -> s, angle -> rad (non-convertible units are kept).
 fn unify(v: f64, unit: Option<String>) -> (f64, Option<String>) {
     let Some(u) = unit else {
         return (v, None);
@@ -1537,13 +1537,13 @@ fn unify(v: f64, unit: Option<String>) -> (f64, Option<String>) {
     }
 }
 
-/// less 的 `round(n, d)` 走 `toFixed`：四舍五入、远离零。
+/// less's `round(n, d)` goes through `toFixed`: round half away from zero.
 fn fixed(v: f64, digits: usize) -> f64 {
     let scale = 10f64.powi(digits as i32);
     (v * scale).round() / scale
 }
 
-/// `sin`/`cos`/`tan`（结果无单位）与 `asin`/`acos`/`atan`（结果 rad）。
+/// `sin`/`cos`/`tan` (unitless results) and `asin`/`acos`/`atan` (results in rad).
 fn math_fn<'a>(
     name: &str,
     f: &Function<'a>,
@@ -1565,7 +1565,7 @@ fn math_fn<'a>(
     Some(fmt_with_unit(out, Some(unit.to_string())))
 }
 
-/// `pow`/`sqrt`/`mod`（less `functions/number.js`）。
+/// `pow`/`sqrt`/`mod` (less `functions/number.js`).
 fn number_fn<'a>(
     name: &str,
     f: &Function<'a>,
@@ -1587,7 +1587,7 @@ fn number_fn<'a>(
     Some(fmt_with_unit(out.0, out.1))
 }
 
-/// 第 `i` 个实参（跳过分隔符）的数值。
+/// Numeric value of the `i`-th argument (skipping delimiters).
 fn number_arg_at<'a>(
     args: &[ComponentValue<'a>],
     i: usize,
@@ -1602,7 +1602,7 @@ fn number_arg_at<'a>(
     number_in(node, src, scope, depth, false)
 }
 
-/// `min`/`max`：同单位（可换算）比较取极值，多单位不可换算时 less 原样输出。
+/// `min`/`max`: pick the extreme among same (convertible) units; with multiple non-convertible units less emits them as-is.
 fn min_max<'a>(
     f: &Function<'a>,
     is_min: bool,
@@ -1619,7 +1619,7 @@ fn min_max<'a>(
     if cands.is_empty() {
         return None;
     }
-    // less 把无单位的实参当作「首个带单位的实参」的单位
+    // less treats a unitless argument as having the unit of the "first argument with a unit"
     let unit_static = cands.iter().find_map(|c| c.1.clone());
     let unified: Vec<(f64, Option<String>)> = cands
         .iter()
@@ -1640,12 +1640,12 @@ fn min_max<'a>(
             best = i;
         }
     }
-    // 输出原始实参（less 取 `order[j].toCSS()`，保留它自己的单位）
+    // Emit the original argument (less takes `order[j].toCSS()`, keeping its own unit)
     let (v, u) = &cands[best];
     Some(fmt_with_unit(*v, u.clone()))
 }
 
-/// `convert(value, unit)`：同组单位换算（less `Dimension.convertTo`）。
+/// `convert(value, unit)`: same-group unit conversion (less `Dimension.convertTo`).
 fn convert_fn<'a>(
     f: &Function<'a>,
     src: &'a str,
@@ -1656,7 +1656,7 @@ fn convert_fn<'a>(
     let target = unquote(&eval(f.args.last()?, src, scope, depth + 1));
     let (group, from) = unit_factor(u.as_deref()?)?;
     let (target_group, to) = unit_factor(&target)?;
-    // 不同组不做换算（less 的 `convertTo` 只处理命中的组）
+    // No conversion across groups (less's `convertTo` only handles the matching group)
     let v = if group == target_group {
         v * from / to
     } else {
@@ -1665,7 +1665,7 @@ fn convert_fn<'a>(
     Some(fmt_with_unit(v, Some(target)))
 }
 
-/// 颜色混合模式（less `functions/color-blending.js`，W3C 合成公式）。
+/// Color blend modes (less `functions/color-blending.js`, W3C compositing formulas).
 fn blend(mode: &str, backdrop: Color, source: Color) -> Color {
     let f = |cb: f64, cs: f64| match mode {
         "multiply" => cb * cs,
@@ -1692,7 +1692,7 @@ fn blend(mode: &str, backdrop: Color, source: Color) -> Color {
             };
             cb - (1.0 - 2.0 * cs) * e * (d - cb)
         }
-        // hardlight 就是 overlay 的参数互换：overlay(cs, cb)
+        // hardlight is just overlay with the arguments swapped: overlay(cs, cb)
         "hardlight" => {
             let cs2 = cs * 2.0;
             if cs2 <= 1.0 {
@@ -1727,7 +1727,7 @@ fn blend(mode: &str, backdrop: Color, source: Color) -> Color {
     }
 }
 
-/// `hsv(h, s, v, a)`：less 的 perm 表实现。
+/// `hsv(h, s, v, a)`: less's perm table implementation.
 fn hsv_color(h: f64, s: f64, v: f64, a: f64) -> Color {
     let h = ((h % 360.0) / 360.0) * 360.0;
     let i = ((h / 60.0) % 6.0).floor();
@@ -1755,9 +1755,9 @@ fn hsv_color(h: f64, s: f64, v: f64, a: f64) -> Color {
     }
 }
 
-/// `contrast(color[, dark, light, threshold])`：按 luma 选深色或浅色。
+/// `contrast(color[, dark, light, threshold])`: picks dark or light by luma.
 ///
-/// 返回选中实参的**原文本**：less 直接交回那个 Color 节点，`#eee` 不会被拉长成 `#eeeeee`。
+/// Returns the **raw text** of the selected argument: less hands back that Color node, so `#eee` is not lengthened to `#eeeeee`.
 fn contrast_color(c: Color, args: &[String]) -> String {
     let pick = |i: usize, fallback: &str| -> (String, Color) {
         match args.get(i).and_then(|a| parse_color(a)) {
@@ -1782,7 +1782,7 @@ fn contrast_color(c: Color, args: &[String]) -> String {
     }
 }
 
-/// `replace(string, pattern, replacement, flags)`：仅字面量模式（无正则元字符）。
+/// `replace(string, pattern, replacement, flags)`: literal patterns only (no regex metacharacters).
 fn replace_fn<'a>(
     args: &[ComponentValue<'a>],
     src: &'a str,
@@ -1804,7 +1804,7 @@ fn replace_fn<'a>(
         .and_then(|g| g.first())
         .map(|n| unquote(&eval(n, src, scope, depth + 1)))
         .unwrap_or_default();
-    // JavaScript 正则表达式语法不在支持范围内：带元字符时保留调用原样
+    // JavaScript regex syntax is out of scope: keep the call as-is when metacharacters are present
     if pattern.is_empty() || pattern.chars().any(|c| "\\^$.|?*+()[]{}".contains(c)) {
         return None;
     }
@@ -1834,7 +1834,7 @@ fn replace_fn<'a>(
     })
 }
 
-/// `boolean(cond)` / `if(cond, a, b)`：只对选中分支求值。
+/// `boolean(cond)` / `if(cond, a, b)`: evaluates only the selected branch.
 fn cond_function<'a>(
     name: &str,
     f: &Function<'a>,
@@ -1869,10 +1869,10 @@ fn cond_function<'a>(
 }
 
 // ---------------------------------------------------------------------------
-// `calc()`（less `tree/call.js`）：calc 内关掉 math，只写回变量与函数的结果
+// `calc()` (less `tree/call.js`): math is turned off inside calc, only variables and function results are written back
 // ---------------------------------------------------------------------------
 
-/// calc 内部求值结果：数值（可丢括号）与其他（括号保留）。
+/// Evaluation result inside calc: a number (parentheses can be dropped) or something else (parentheses kept).
 enum CalcOut {
     Dim(String),
     Other(String),
@@ -1898,7 +1898,7 @@ fn calc_text<'a>(f: &Function<'a>, src: &'a str, scope: &dyn Scope<'a>, depth: u
     format!("calc({})", out.join(", "))
 }
 
-/// calc 的顶层实参：括号全部剥掉（less 的 Expression 单值拍平）。
+/// Top-level arguments of calc: all parentheses are stripped (less's Expression flattens single values).
 fn calc_top<'a>(
     cv: &ComponentValue<'a>,
     src: &'a str,
@@ -1911,7 +1911,7 @@ fn calc_top<'a>(
     }
 }
 
-/// 运算的操作数：带括号且结果不是数值时保留一层括号。
+/// Operand of an operation: keep one layer of parentheses when it has them and the result is not a number.
 fn calc_operand<'a>(
     cv: &ComponentValue<'a>,
     src: &'a str,
@@ -1966,7 +1966,7 @@ fn calc_value<'a>(
     }
 }
 
-/// calc 内的变量：先按 `math: always` 求值（less 用 `_SELF` 包一层级联求值）。
+/// A variable inside calc: evaluated first with `math: always` (less wraps it in `_SELF` for cascading evaluation).
 fn calc_var<'a>(
     name: &str,
     src: &'a str,
@@ -1986,7 +1986,7 @@ fn calc_var<'a>(
     }
 }
 
-/// 运算符两侧的空白：less 的 `Operation.isSpaced` 只看运算符前的空白。
+/// Whitespace around the operator: less's `Operation.isSpaced` only looks at the whitespace before the operator.
 fn calc_sep(
     left: &ComponentValue<'_>,
     right: &ComponentValue<'_>,
@@ -2013,7 +2013,7 @@ fn calc_sep(
     }
 }
 
-/// 数值参数的精确求值：直接算 f64，避免「格式化成 8 位小数再解析」丢精度。
+/// Exact evaluation of numeric arguments: compute f64 directly, avoiding the precision loss of "format to 8 decimals and re-parse".
 fn number_arg<'a>(
     args: &[ComponentValue<'a>],
     src: &'a str,
@@ -2050,7 +2050,7 @@ fn number_in<'a>(
         ComponentValue::LessParenthesizedOperation(p) => {
             number_in(&p.operation, src, scope, depth + 1, true)
         }
-        // min/max 等函数的实参是 calc 树：那里没有 calc() 的「关 math」语义
+        // Arguments of functions like min/max are calc trees: the "math off" semantics of calc() do not apply there
         ComponentValue::Calc(c) => {
             let (lv, lu) = number_in(&c.left, src, scope, depth + 1, paren)?;
             let (rv, ru) = number_in(&c.right, src, scope, depth + 1, paren)?;
@@ -2072,7 +2072,7 @@ fn number_in<'a>(
             Some((v, lu.or(ru)))
         }
         ComponentValue::CalcParenthesized(p) => number_in(&p.expr, src, scope, depth + 1, paren),
-        // 变量值里嵌套的数值函数（`floor((@a * 1.15))`）
+        // Numeric functions nested in a variable value (`floor((@a * 1.15))`)
         ComponentValue::Function(f) => {
             let (v, u) = number_in(f.args.first()?, src, scope, depth + 1, true)?;
             match function_name(f).as_str() {
@@ -2095,14 +2095,14 @@ fn number_in<'a>(
                 _ => None,
             }
         }
-        // math=parens-division：括号外的除法不计算
+        // math=parens-division: division outside parentheses is not computed
         ComponentValue::LessBinaryOperation(op) => {
             if matches!(op.op.kind, LessOperationOperatorKind::Division) && !paren {
                 return None;
             }
             let (lv, lu) = number_in(&op.left, src, scope, depth + 1, paren)?;
             let (rv, ru) = number_in(&op.right, src, scope, depth + 1, paren)?;
-            // 同 `operate`：只有 +/- 会做同组单位换算（乘法/除法只保留左单位）
+            // Same as `operate`: only +/- does same-group unit conversion (multiplication/division keep the left unit)
             let rv = match (lu.as_deref(), ru.as_deref()) {
                 (Some(l), Some(r))
                     if matches!(
@@ -2150,8 +2150,8 @@ fn is_css(v: bool) -> String {
     }
 }
 
-/// less `escape`：JS `encodeURIComponent`（保留 `A-Za-z0-9-_.!~*'()`），
-/// 再把 `= : # ; ( )` 转义。
+/// less `escape`: JS `encodeURIComponent` (keeping `A-Za-z0-9-_.!~*'()`),
+/// then escaping `= : # ; ( )`.
 fn escape_url(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     for b in text.bytes() {
@@ -2166,7 +2166,7 @@ fn escape_url(text: &str) -> String {
     out
 }
 
-/// less `%("format", args...)`：逐个实参替换第一个 `%s`/`%d`/`%a`，最后把 `%%` 收回 `%`。
+/// less `%("format", args...)`: substitutes the first `%s`/`%d`/`%a` with each argument in turn, then turns `%%` back into `%`.
 fn format_string(args: &[String]) -> Option<String> {
     let first = args.first()?;
     let quote = first.chars().next().filter(|c| *c == '"' || *c == '\'');
@@ -2197,7 +2197,7 @@ fn format_string(args: &[String]) -> Option<String> {
     })
 }
 
-/// 函数参数按源区间拼接：逗号与空白来自源文本（args 里可能含 Delimiter 节点）。
+/// Function arguments joined by source span: commas and whitespace come from the source text (args may contain Delimiter nodes).
 fn join_args<'a>(
     args: &[ComponentValue<'a>],
     src: &'a str,
@@ -2210,7 +2210,7 @@ fn join_args<'a>(
 pub(super) fn function_name(f: &Function) -> String {
     match &f.name {
         FunctionName::Ident(InterpolableIdent::Literal(ident)) => ident.name.to_string(),
-        // `%("...", args)`：less 的 format 函数
+        // `%("...", args)`: less's format function
         FunctionName::LessFormatFunction(_) => "%".to_string(),
         other => format!("{other:?}"),
     }
@@ -2224,10 +2224,10 @@ fn fmt_with_unit(v: f64, unit: Option<String>) -> String {
 }
 
 // ---------------------------------------------------------------------------
-// 数字
+// Numbers
 // ---------------------------------------------------------------------------
 
-/// `"10px"` → `(10.0, Some("px"))`；`"0.5"` → `(0.5, None)`；`"50%"` → `(50.0, Some("%"))`。
+/// `"10px"` -> `(10.0, Some("px"))`; `"0.5"` -> `(0.5, None)`; `"50%"` -> `(50.0, Some("%"))`.
 pub(crate) fn parse_number(s: &str) -> Option<(f64, Option<String>)> {
     let s = s.trim();
     let b = s.as_bytes();
@@ -2248,7 +2248,7 @@ pub(crate) fn parse_number(s: &str) -> Option<(f64, Option<String>)> {
     if i == digits {
         return None;
     }
-    // 指数部分：`e`/`E` 后必须紧跟（可带符号的）数字，否则当作单位开头（如 `em`）
+    // Exponent part: `e`/`E` must be followed directly by a (possibly signed) number, otherwise it starts a unit (e.g. `em`)
     if i < b.len() && (b[i] == b'e' || b[i] == b'E') {
         let mut j = i + 1;
         if j < b.len() && (b[j] == b'+' || b[j] == b'-') {
@@ -2268,19 +2268,19 @@ pub(crate) fn parse_number(s: &str) -> Option<(f64, Option<String>)> {
     Some((v, (!unit.is_empty()).then(|| unit.to_string())))
 }
 
-/// less `Node.fround`：`Number((value + 2e-16).toFixed(8))`，偏置避免二进制下溢把
-/// 8 位小数卡在进位边界（`0.66666666` vs `0.66666667`）。
+/// less `Node.fround`: `Number((value + 2e-16).toFixed(8))`; the bias keeps binary underflow from
+/// pinning 8 decimals at a rounding boundary (`0.66666666` vs `0.66666667`).
 fn round8(v: f64) -> f64 {
     ((v + 2e-16) * 1e8).round() / 1e8
 }
 
 thread_local! {
-    /// 求值期（选择器/属性名插值）的数值格式：less 在 `eval` 阶段用 `String(value)`，
-    /// 只有 `genCSS` 阶段才受 `numPrecision: 8` 约束。
+    /// Number formatting during the eval phase (selector/property-name interpolation): less uses `String(value)` in `eval`,
+    /// and only `genCSS` is subject to `numPrecision: 8`.
     static PRECISE: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
 }
 
-/// 在「求值期数值不经 8 位截断」的模式下执行。
+/// Runs in the mode where numbers are not truncated to 8 decimals during the eval phase.
 pub(crate) fn precise<R>(f: impl FnOnce() -> R) -> R {
     PRECISE.with(|p| {
         let old = p.replace(true);
@@ -2290,7 +2290,7 @@ pub(crate) fn precise<R>(f: impl FnOnce() -> R) -> R {
     })
 }
 
-/// JS `Number.prototype.toString` 的最短往返形式（求值期用）。
+/// Shortest round-trip form of JS `Number.prototype.toString` (used during the eval phase).
 fn fmt_number_exact(v: f64) -> String {
     if !v.is_finite() || v == 0.0 {
         return "0".to_string();
@@ -2298,7 +2298,7 @@ fn fmt_number_exact(v: f64) -> String {
     format!("{v}")
 }
 
-/// JS `Number.prototype.toString` 的近似：整数不带 `.0`，小数最多 8 位并去尾随 0。
+/// Approximation of JS `Number.prototype.toString`: integers have no `.0`, decimals have at most 8 places with trailing zeros removed.
 pub(crate) fn fmt_number(v: f64) -> String {
     if PRECISE.with(|p| p.get()) {
         return fmt_number_exact(v);
@@ -2330,7 +2330,7 @@ pub(crate) fn fmt_number(v: f64) -> String {
     s
 }
 
-/// 去掉值两端成对的引号（字符串变量参与插值/变量变量时用）。
+/// Removes a matching pair of quotes around the value (used when a string variable takes part in interpolation/variable variables).
 fn unquote(s: &str) -> String {
     unquote_ref(s).to_string()
 }
@@ -2345,11 +2345,11 @@ pub(super) fn unquote_ref(s: &str) -> &str {
 }
 
 // ---------------------------------------------------------------------------
-// 颜色
+// Colors
 // ---------------------------------------------------------------------------
 
-/// less 的颜色：通道是浮点。HSL→RGB 不取整，只在输出时 `Math.round`，
-/// 因此 `darken(darken(#428bca, 6.5%), 15%)` 这类链式调用必须保留中间精度。
+/// A less color: channels are floating point. HSL->RGB does not round, rounding happens only at output (`Math.round`),
+/// so chained calls such as `darken(darken(#428bca, 6.5%), 15%)` must keep intermediate precision.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct Color {
     pub(crate) r: f64,
@@ -2375,7 +2375,7 @@ impl Color {
         }
     }
 
-    /// less `Color.toHSL`：h 为度，s/l 为 0..1。
+    /// less `Color.toHSL`: h in degrees, s/l in 0..1.
     pub(crate) fn to_hsl(self) -> (f64, f64, f64) {
         let (r, g, b) = (self.r / 255.0, self.g / 255.0, self.b / 255.0);
         let (max, min) = (r.max(g).max(b), r.min(g).min(b));
@@ -2399,7 +2399,7 @@ impl Color {
         (h / 6.0 * 360.0, s, l)
     }
 
-    /// less `functions.hsla`：h 为度，s/l/a 为 0..1。
+    /// less `functions.hsla`: h in degrees, s/l/a in 0..1.
     pub(crate) fn from_hsl(h: f64, s: f64, l: f64, a: f64) -> Self {
         let h = (h % 360.0) / 360.0;
         let (s, l, a) = (s.clamp(0.0, 1.0), l.clamp(0.0, 1.0), a.clamp(0.0, 1.0));
@@ -2435,7 +2435,7 @@ impl Color {
         }
     }
 
-    /// less `toARGB`：`#aarrggbb`。
+    /// less `toARGB`: `#aarrggbb`.
     fn to_argb(self) -> String {
         let ch = |v: f64| v.round().clamp(0.0, 255.0) as u8;
         format!(
@@ -2447,7 +2447,7 @@ impl Color {
         )
     }
 
-    /// less `Color.luma()`（WCAG 相对亮度，带 gamma 校正），比值为 0..1。
+    /// less `Color.luma()` (WCAG relative luminance, gamma-corrected), value in 0..1.
     fn luma(self) -> f64 {
         let f = |c: f64| {
             let c = c / 255.0;
@@ -2460,12 +2460,12 @@ impl Color {
         0.2126 * f(self.r) + 0.7152 * f(self.g) + 0.0722 * f(self.b)
     }
 
-    /// less `luminance()`：未做 gamma 校正的加权亮度，比值为 0..1。
+    /// less `luminance()`: weighted luminance without gamma correction, value in 0..1.
     fn luminance(self) -> f64 {
         0.2126 * self.r / 255.0 + 0.7152 * self.g / 255.0 + 0.0722 * self.b / 255.0
     }
 
-    /// less `toHSV`：h 为度，s/v 为 0..1。
+    /// less `toHSV`: h in degrees, s/v in 0..1.
     fn to_hsv(self) -> (f64, f64, f64) {
         let (r, g, b) = (self.r / 255.0, self.g / 255.0, self.b / 255.0);
         let (max, min) = (r.max(g).max(b), r.min(g).min(b));
@@ -2502,7 +2502,7 @@ const NAMED: &[(&str, u32)] = &[
     ("transparent", 0x000000),
 ];
 
-/// `number(n)`：百分比取 `/100`，其余取原值（less `functions/color.js`）。
+/// `number(n)`: percentages divide by `/100`, everything else keeps its value (less `functions/color.js`).
 fn color_number(text: &str) -> Option<f64> {
     parse_number(text).map(|(v, u)| {
         if u.as_deref() == Some("%") {
@@ -2597,7 +2597,7 @@ pub(crate) fn parse_color(s: &str) -> Option<Color> {
     })
 }
 
-/// 颜色函数的参数：逗号分隔（旧语法）或空白 + `/ alpha`（新语法）。
+/// Arguments of a color function: comma-separated (old syntax) or whitespace plus `/ alpha` (new syntax).
 fn color_parts(inner: &str) -> (String, String, String, Option<String>) {
     let inner = inner.trim();
     let (main, alpha) = match inner.split_once('/') {
@@ -2618,7 +2618,7 @@ fn color_parts(inner: &str) -> (String, String, String, Option<String>) {
     )
 }
 
-/// rgb 通道：百分比按 255 缩放，其余原值（less `scaled`）。
+/// An rgb channel: percentages scale by 255, everything else keeps its value (less `scaled`).
 fn color_channel(text: &str) -> Option<f64> {
     match parse_number(text) {
         Some((v, Some(u))) if u == "%" => Some(v * 255.0 / 100.0),
@@ -2627,10 +2627,10 @@ fn color_channel(text: &str) -> Option<f64> {
     }
 }
 
-/// 结构化取色：沿 AST 求值颜色，保留 HSL→RGB 的浮点通道。
+/// Structured color extraction: evaluate the color along the AST, keeping the HSL->RGB floating-point channel.
 ///
-/// 文本求值会把颜色写成 `#rrggbb`，链式调用（`darken(spin(@c, -10), 5%)`）会因此丢精度；
-/// less 传的是 Color 对象，所以这里沿 AST 递归。
+/// Text evaluation writes colors as `#rrggbb`, so chained calls (`darken(spin(@c, -10), 5%)`) would lose precision;
+/// less passes a Color object, so this recurses along the AST.
 fn color_arg<'a>(
     cv: &ComponentValue<'a>,
     src: &'a str,
@@ -2647,11 +2647,11 @@ fn color_arg<'a>(
             color_in_var(c.variable.name.name, src, scope, depth)
         }
         ComponentValue::Function(f) => color_function(f, src, scope, depth),
-        // `$prop`：取属性值文本再当颜色（`lighten($color, 10%)`）
+        // `$prop`: take the property value text and use it as a color (`lighten($color, 10%)`)
         ComponentValue::LessPropertyVariable(p) => {
             prop_text(p.name.name, src, scope, depth + 1).and_then(|t| parse_color(&t))
         }
-        // 命名颜色（`red`/`transparent`）等纯文本颜色
+        // Plain-text colors such as named colors (`red`/`transparent`)
         _ => parse_color(text(src, cv).trim()),
     }
 }
@@ -2672,20 +2672,20 @@ fn color_in_var<'a>(
     }
 }
 
-/// 供编译器绑定实参用：AST 求值成颜色（保留浮点通道）。
+/// Used by the compiler to bind arguments: evaluates the AST into a color (keeping the floating-point channel).
 pub(super) fn color_of<'a>(
     cv: &ComponentValue<'a>,
     src: &'a str,
     scope: &dyn Scope<'a>,
 ) -> Option<Color> {
-    // 字面量（含沿变量链找到的字面量）保留源文本：`#333` 不应该展开成 `#333333`
+    // Literals (including literals found along a variable chain) keep their source text: `#333` must not expand to `#333333`
     if literal_color_text(cv, src, scope, 0).is_some() {
         return None;
     }
     color_arg(cv, src, scope, 0)
 }
 
-/// 颜色值的字面量源文本：`#333`、`#FFAA00`、`red`，沿变量链查找。
+/// Literal source text of a color value: `#333`, `#FFAA00`, `red`, looked up along variable chains.
 fn literal_color_text<'a>(
     cv: &ComponentValue<'a>,
     src: &'a str,
@@ -2731,7 +2731,7 @@ fn color_function<'a>(
     depth: usize,
 ) -> Option<Color> {
     let name = function_name(f);
-    // 逗号在 AST 里是独立节点：按参数序号取节点时必须过滤
+    // A comma is a separate node in the AST: it must be filtered when taking nodes by argument index
     let vals: Vec<&ComponentValue> = f
         .args
         .iter()
@@ -2776,7 +2776,7 @@ fn color_function<'a>(
     })
 }
 
-/// `lighten`/`darken`/`saturate`/`desaturate`/`spin`/`greyscale` 共用的 HSL 调整。
+/// The HSL adjustment shared by `lighten`/`darken`/`saturate`/`desaturate`/`spin`/`greyscale`.
 fn adjust(c: Color, name: &str, amount: f64, relative: bool) -> Option<Color> {
     let (h, s, l) = c.to_hsl();
     let d = amount / 100.0;
@@ -2803,7 +2803,7 @@ fn fade(c: Color, name: &str, amount: f64) -> Color {
     Color { a: clamp01(a), ..c }
 }
 
-/// less `mix`（带 alpha 加权的 Sass 公式）。
+/// less `mix` (the Sass formula with alpha weighting).
 fn mix_colors(a: Color, b: Color, weight: f64) -> Color {
     let w = weight * 2.0 - 1.0;
     let da = a.a - b.a;
@@ -2827,7 +2827,7 @@ fn clamp01(v: f64) -> f64 {
     v.clamp(0.0, 1.0)
 }
 
-/// 函数参数逐个求值（去掉逗号节点）。
+/// Evaluates function arguments one by one (dropping comma nodes).
 fn eval_args<'a>(
     f: &Function<'a>,
     src: &'a str,
@@ -2841,7 +2841,7 @@ fn eval_args<'a>(
         .collect()
 }
 
-/// `hsl()`/`hsla()` 的 (h, s, l, a)：`number()` 语义，百分比取 `/100`。
+/// `hsl()`/`hsla()` (h, s, l, a): `number()` semantics, percentages divide by `/100`.
 fn hsl_args(args: &[String]) -> Option<(f64, f64, f64, f64)> {
     let h = parse_number(arg_at(args, 0))?.0;
     let s = color_number(arg_at(args, 1))?;
@@ -2850,9 +2850,9 @@ fn hsl_args(args: &[String]) -> Option<(f64, f64, f64, f64)> {
     Some((h, s, l, a))
 }
 
-/// `hsl()`/`hsla()` 输出：less 先转 RGB 再转回 HSL（取整发生在 `fround`）。
+/// `hsl()`/`hsla()` output: less converts to RGB and back to HSL (rounding happens in `fround`).
 fn hsl_text(args: &[String]) -> Option<String> {
-    // `hsla(color, alpha)`：less 允许把颜色作为第一个参数
+    // `hsla(color, alpha)`: less allows a color as the first argument
     if let Some(c) = args.first().and_then(|a| parse_color(a)) {
         let a = args.get(1).and_then(|a| color_number(a)).unwrap_or(c.a);
         let (h, s, l) = c.to_hsl();
@@ -2906,7 +2906,7 @@ mod tests {
 
     #[test]
     fn unit_conversion_matches_less() {
-        // less: 1cm + 10mm => 2cm；1px + 1em => 2px（不可换算时保留左单位）
+        // less: 1cm + 10mm => 2cm; 1px + 1em => 2px (the left unit is kept when not convertible)
         assert_eq!(
             operate(&LessOperationOperatorKind::Plus, "1cm", "10mm").as_deref(),
             Some("2cm")
@@ -2923,7 +2923,7 @@ mod tests {
 
     #[test]
     fn color_arithmetic_matches_less() {
-        // less: #333 + #111 => #444444；#888 * 0.5 => #444444
+        // less: #333 + #111 => #444444; #888 * 0.5 => #444444
         assert_eq!(
             operate(&LessOperationOperatorKind::Plus, "#333", "#111").as_deref(),
             Some("#444444")

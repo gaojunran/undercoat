@@ -1,7 +1,6 @@
-@charset "UTF-8";
 /*!
- * 许可证块注释的续行也要有 segment
- * 第三行
+ * every license block comment continuation line needs a segment
+ * third line
  */
 .accent,
 .plain,
@@ -28,7 +27,7 @@
     opacity: 0;
   }
 }
-/* 规则之间的单行注释 */
+/* single-line comment between rules */
 .pct {
   width: 50%;
 }

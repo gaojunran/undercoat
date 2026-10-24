@@ -8,7 +8,7 @@ $global-count: 0;
 
 .scope {
   $base: 12px;
-  $derived: $base; // 声明时急切求值：取块内当前的 $base
+  $derived: $base; // evaluated eagerly at declaration: takes the current $base inside the block
   width: $derived;
   $base: 16px;
   nested-width: $base;

@@ -1,4 +1,4 @@
-// (reference)：只登记不输出；被 mixin 调用时才产出声明
+// (reference): registered but not emitted; declarations are produced only when a mixin calls it
 @import (reference) "imports/reference-src.less";
 
 .a {
@@ -6,4 +6,4 @@
   own: 1;
 }
 
-// 未引用的 .ref-rule 不输出
+// an unreferenced .ref-rule is not emitted

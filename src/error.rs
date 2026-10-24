@@ -1,26 +1,29 @@
-//! 编译错误类型：整个 crate 唯一的错误值。
+//! Compile error type: the only error value in the whole crate.
 //!
-//! 解析期错误带定位（行/列相对出错文件文本），求值期语义错误只有 message；
-//! `Display` 只输出 message，`source()` 恒为 `None`（无错误链）。
+//! Parse-time errors carry a location (line/column relative to the failing file's text);
+//! evaluation-time semantic errors only have a message. `Display` prints only the message,
+//! and `source()` is always `None` (no error chain).
 //!
-//! 内部各阶段用 `Result<T, Box<CompileError>>`（公开入口再拆箱）：`CompileError`
-//! 本身 64 字节，直接内联进 `Result` 会让深度递归（mixin 嵌套 256 层）的调试版
-//! 栈帧显著变大而溢出；装箱后 `Result` 仍是 8 字节（胖指针大小）。
+//! Each internal stage uses `Result<T, Box<CompileError>>` (the public entry points unbox
+//! it): `CompileError` itself is 64 bytes, and inlining it directly into `Result` would make
+//! debug-build stack frames of deep recursion (256 levels of nested mixins) significantly
+//! larger and overflow the stack; boxed, `Result` is still 8 bytes (the size of a fat
+//! pointer).
 
-/// 编译错误：`path` / `line` / `column` 只在定位命中时存在。
+/// Compile error: `path` / `line` / `column` are present only when a location was matched.
 #[derive(Debug)]
 pub struct CompileError {
     pub message: String,
-    /// 出错文件绝对路径（定位命中时）。
+    /// Absolute path of the failing file (when a location was matched).
     pub path: Option<String>,
-    /// 1-based 行号。
+    /// 1-based line number.
     pub line: Option<u32>,
-    /// 0-based 列号。
+    /// 0-based column number.
     pub column: Option<u32>,
 }
 
 impl CompileError {
-    /// 无定位的错误（读盘失败、不支持的入口等）。
+    /// An error without a location (read failure, unsupported entry point, etc.).
     pub(crate) fn new(message: impl Into<String>) -> Self {
         Self {
             message: message.into(),

@@ -1,5 +1,6 @@
-//! Golden 对拍：`tests/fixtures/*.less` 的期望产物由真实 less@4.1.3 生成
-//! （见 `scripts/style-diff/`），这里只做逐字节断言，CI 不依赖 node。
+//! Golden comparison: expected output for `tests/fixtures/*.less` is produced by real
+//! less@4.1.3 (see `scripts/style-diff/`); here we only assert byte for byte, and CI does
+//! not depend on node.
 
 use std::path::Path;
 
@@ -21,19 +22,19 @@ fn fixtures_match_less_byte_for_byte() {
         let source = std::fs::read_to_string(&path).expect("read less");
         let expected_path = path.with_extension("css");
         let expected = std::fs::read_to_string(&expected_path)
-            .unwrap_or_else(|e| panic!("缺少期望产物 {}: {e}", expected_path.display()));
+            .unwrap_or_else(|e| panic!("missing expected output {}: {e}", expected_path.display()));
 
         let out = compile_file(&path, &source, &Options::default())
             .unwrap_or_else(|e| panic!("{}: {e:#}", path.display()));
         assert_eq!(
             out.css,
             expected,
-            "产物与 less@4.1.3 不一致: {}",
+            "output does not match less@4.1.3: {}",
             path.display()
         );
         checked += 1;
     }
-    assert!(checked >= 6, "fixtures 数量异常: {checked}");
+    assert!(checked >= 6, "unexpected number of fixtures: {checked}");
 }
 
 #[test]
@@ -55,9 +56,9 @@ fn source_map_is_reversible() {
     let map = out.map.expect("source map");
     let v: serde_json::Value = serde_json::from_str(&map).expect("parse map");
     assert_eq!(v["version"], 3);
-    // sources 已重写为 project_root 相对
+    // sources have been rewritten relative to project_root
     assert_eq!(v["sources"][0], "basic.less");
-    // 选择器与声明各至少一条映射
+    // At least one mapping each for selectors and declarations
     let mappings = v["mappings"].as_str().expect("mappings");
     assert!(mappings.matches(';').count() >= 1, "mappings = {mappings}");
 }

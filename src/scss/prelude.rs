@@ -1,12 +1,14 @@
-//! at-rule 前导：插值/变量替换、media 合并、`@supports` 条件结构化与打印。
+//! at-rule preludes: interpolation/variable substitution, media merging,
+//! `@supports` condition structuring and printing.
 //!
-//! 由 `scss/mod.rs` 拆分而来（纯搬运）。
+//! Split out of `scss/mod.rs` (pure code move).
 
 use super::*;
 
 impl<'a> Converter<'a> {
-    /// `@media` prelude 里的值：媒体特性 `name: value` 的值当 SassScript 求值
-    /// （dart 的 `MediaQuery.value` 就是表达式），求不出来时才退回裸 `$var` 代入。
+    /// Values inside a `@media` prelude: the value of a media feature `name: value` is
+    /// evaluated as SassScript (dart's `MediaQuery.value` is an expression), and only
+    /// when that fails do we fall back to substituting a bare `$var`.
     pub(super) fn substitute_vars(
         &mut self,
         text: &str,
@@ -30,7 +32,7 @@ impl<'a> Converter<'a> {
                     i = close + 1;
                 }
                 _ => {
-                    let ch = text[i..].chars().next().expect("非空");
+                    let ch = text[i..].chars().next().expect("non-empty");
                     out.push(ch);
                     i += ch.len_utf8();
                 }
@@ -39,7 +41,8 @@ impl<'a> Converter<'a> {
         Ok(out)
     }
 
-    /// 一个媒体特性（`min-width: $bp - 1px`）：值含 `$` 时整体当 SassScript 求值。
+    /// One media feature (`min-width: $bp - 1px`): when the value contains `$`, the whole
+    /// value is evaluated as SassScript.
     fn media_feature(&mut self, inner: &str, base: usize) -> Result<String, Box<CompileError>> {
         let Some(colon) = top_level_colon(inner) else {
             return self.substitute_vars_fallback(inner, base);
@@ -57,7 +60,8 @@ impl<'a> Converter<'a> {
         ))
     }
 
-    /// 媒体特性的值求值：只接受能完整解析成 SassScript 的表达式。
+    /// Evaluate the value of a media feature: only expressions that parse completely as
+    /// SassScript are accepted.
     fn media_value(&mut self, value: &str, at: usize) -> Option<String> {
         let trimmed = value.trim();
         let start = at + leading_ws(value);
@@ -65,7 +69,8 @@ impl<'a> Converter<'a> {
         evaluated.to_css().ok()
     }
 
-    /// prelude 文本里的裸 `$var` 替换（`media_feature` 求值失败时的兜底）。
+    /// Substitute a bare `$var` in prelude text (the fallback when `media_feature`
+    /// evaluation fails).
     fn substitute_vars_fallback(
         &mut self,
         text: &str,
@@ -111,7 +116,8 @@ impl<'a> Converter<'a> {
         Ok(out)
     }
 
-    /// 语句头到块首（无块则到语句尾）的原文 prelude。
+    /// Raw prelude from the end of the statement head to the start of the block (or to
+    /// the end of the statement when there is no block).
     pub(super) fn prelude_raw(&self, at: &oxc_css_parser::ast::AtRule<'a>) -> String {
         let src = self.src();
         let end = match &at.block {
@@ -126,12 +132,12 @@ impl<'a> Converter<'a> {
     }
 }
 
-/// `#{` 在 `text` 的 `start` 处，返回到配对 `}` 的字节下标。
+/// `#{` at `start` of `text`; returns the byte index of the matching `}`.
 pub(super) fn matching_brace(text: &str, start: usize) -> usize {
     crate::text::matching(text, start + 1).map_or_else(|| text.len() - 1, |end| end - 1)
 }
 
-/// `#{` 在 `chars` 的 `start` 处，返回到配对的 `}` 的下标。
+/// `#{` at `start` of `chars`; returns the index of the matching `}`.
 pub(super) fn interpolation_end(chars: &[(usize, char)], start: usize) -> usize {
     let mut depth = 0usize;
     let mut quote: Option<char> = None;
@@ -175,9 +181,11 @@ pub(super) fn wrap_media(rule: &OutAtRule, items: Vec<Item>) -> Item {
     })
 }
 
-/// 嵌套 `@media` 的 prelude 合并（dart `_mergeMediaQueries`）：
-/// 交叉相乘每条查询；媒体类型相同则保留、不同则丢弃该组合；带 `not` / `only`
-/// 修饰的查询不参与合并（dart 保持嵌套）。返回 `None` 表示整体不可合并。
+/// Merge the preludes of nested `@media` (dart `_mergeMediaQueries`):
+/// take the cross product of the queries; if the media types are equal the pair is
+/// kept, if they differ the combination is dropped; queries with a `not` / `only`
+/// modifier do not participate in merging (dart keeps them nested). `None` means the
+/// whole thing cannot be merged.
 pub(super) fn merge_media(outer: &str, inner: &str) -> Option<String> {
     if has_media_modifier(outer) || has_media_modifier(inner) {
         return None;
@@ -200,7 +208,7 @@ fn has_media_modifier(prelude: &str) -> bool {
     })
 }
 
-/// 单条查询合并：`(a) and (b)`，媒体类型取相同的那个。
+/// Merge a single query pair: `(a) and (b)`, taking the media type when both agree.
 fn merge_media_query(outer: &str, inner: &str) -> Option<String> {
     let (outer_type, mut conditions) = media_query_parts(outer);
     let (inner_type, inner_conditions) = media_query_parts(inner);
@@ -220,7 +228,8 @@ fn merge_media_query(outer: &str, inner: &str) -> Option<String> {
     Some(out)
 }
 
-/// 拆一条媒体查询成「类型」与「条件」列表（顶层 `and` 分隔）。
+/// Split one media query into a "type" and a list of "conditions" (separated by a
+/// top-level `and`).
 fn media_query_parts(query: &str) -> (Option<String>, Vec<String>) {
     let mut parts = Vec::new();
     let mut start = 0usize;
@@ -261,8 +270,10 @@ fn is_and_at(text: &str, i: usize) -> bool {
         && bytes.get(i + 3).is_some_and(u8::is_ascii_whitespace)
 }
 
-/// `@import` 里的 `url(...)` 按 dart 的 `_visitImport` 重新序列化：参数是带引号的字符串时
-/// 统一用双引号（字符串里含 `"` 时保留单引号），括号内空白折叠（`url( 'x' )` → `url("x")`）。
+/// Re-serialize `url(...)` in `@import` following dart's `_visitImport`: when the
+/// argument is a quoted string, use double quotes uniformly (keep single quotes when
+/// the string contains `"`), and collapse whitespace inside the parentheses
+/// (`url( 'x' )` -> `url("x")`).
 pub(super) fn normalize_import_urls(text: &str) -> String {
     let bytes = text.as_bytes();
     let mut out = String::with_capacity(text.len());
@@ -305,7 +316,8 @@ pub(super) fn normalize_import_urls(text: &str) -> String {
             if j < bytes.len() {
                 let inner = text[inner_start..j].trim();
                 let requoted = match inner.strip_prefix('\'').and_then(|s| s.strip_suffix('\'')) {
-                    // 含双引号或转义时保持原样，避免换引号后语义变化。
+                    // Keep it as is when it contains a double quote or an escape, so that
+                    // changing the quotes cannot change the semantics.
                     Some(content) if !content.contains('"') && !content.contains('\\') => {
                         format!("\"{content}\"")
                     }
@@ -318,26 +330,32 @@ pub(super) fn normalize_import_urls(text: &str) -> String {
                 continue;
             }
         }
-        let ch = text[i..].chars().next().expect("字符边界");
+        let ch = text[i..].chars().next().expect("character boundary");
         out.push(ch);
         i += ch.len_utf8();
     }
     out
 }
 
-/// at-rule prelude 规范化：折叠空白；`(prop:value)` 补冒号后空格；逗号后空格；括号内不留空格。
-/// 转义序列按 dart 的写法重新序列化（`\0` → `\0 `、`\25` → `\%`），终止空格不删。
+/// at-rule prelude normalization: collapse whitespace; add a space after the colon in
+/// `(prop:value)`; one space after commas; no whitespace inside parentheses.
+/// Escape sequences are re-serialized the way dart does (`\0` -> `\0 `, `\25` -> `\%`),
+/// and the terminator space is not removed.
 pub(super) fn normalize_prelude(text: &str) -> String {
-    // 转义序列的终止空白先换成哨兵：`a\61  b` 里第一个空格属于转义、第二个是真空格，
-    // 直接折叠空白会把两者并成一个（dart 输出 `aa b`，折叠后只剩 `aab` 的输入）。
+    // First replace the terminator whitespace of escape sequences with a sentinel: in
+    // `a\61  b` the first space belongs to the escape and the second is a real space, so
+    // collapsing whitespace directly would merge the two (dart outputs `aa b`, whereas
+    // only `aab` would be left after collapsing).
     let guarded = guard_escape_spaces(text);
     let collapsed = value::normalize_raw(&guarded).replace(ESCAPE_SPACE, " ");
     let chars: Vec<char> = collapsed.chars().collect();
     let mut out = String::with_capacity(collapsed.len());
     let mut parens = 0usize;
-    // 转义写法的终止空格（`0\0 )`）不能被括号/逗号处的去空格逻辑吃掉。
+    // The terminator space of an escape (`0\0 )`) must not be eaten by the whitespace
+    // removal at parentheses/commas.
     let mut protect = 0usize;
-    // 标识符起点：只有这里出现数字才需要 `\31 ` 这种写法（`x\31 0` → `x10`）。
+    // Start of an identifier: only a digit appearing here needs the `\31 ` form
+    // (`x\31 0` -> `x10`).
     let mut value_start = true;
     let mut i = 0;
     while i < chars.len() {
@@ -354,7 +372,8 @@ pub(super) fn normalize_prelude(text: &str) -> String {
                     hex.push(chars[i]);
                     i += 1;
                 }
-                // 转义后面的一个空白属于转义本身（`\61 b` → `ab`）。
+                // One whitespace after an escape belongs to the escape itself
+                // (`\61 b` -> `ab`).
                 if i < chars.len() && chars[i].is_whitespace() {
                     i += 1;
                 }
@@ -370,7 +389,8 @@ pub(super) fn normalize_prelude(text: &str) -> String {
             value_start = false;
             continue;
         }
-        // url(...) 内部原样保留（`https://` 的冒号不能动）。
+        // Keep the inside of url(...) verbatim (the colon in `https://` must not be
+        // touched).
         if ch.is_ascii_alphabetic() {
             let word_start = i;
             while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '-') {
@@ -461,10 +481,12 @@ pub(super) fn normalize_prelude(text: &str) -> String {
     out.trim_start().to_string()
 }
 
-/// 转义终止空白的哨兵（U+0001，不会被当成空白折叠）。
+/// Sentinel for the terminator whitespace of an escape (U+0001, which is not collapsed
+/// as whitespace).
 const ESCAPE_SPACE: char = '\u{1}';
 
-/// 把「CSS 转义自带的那个终止空白」替换成哨兵，其余文本原样（引号内不动）。
+/// Replace "the terminator whitespace that a CSS escape carries" with the sentinel and
+/// keep the rest of the text as is (nothing inside quotes is touched).
 fn guard_escape_spaces(text: &str) -> String {
     let chars: Vec<char> = text.chars().collect();
     let mut out = String::with_capacity(text.len());
@@ -521,15 +543,17 @@ fn guard_escape_spaces(text: &str) -> String {
     out
 }
 
-/// 去尾随空格，但保留「转义终止空格」（`protect` 之前的字节）。
+/// Remove trailing spaces, but keep the "escape terminator space" (the bytes before
+/// `protect`).
 fn trim_protected(out: &mut String, protect: usize) {
     while out.len() > protect && out.ends_with(' ') {
         out.pop();
     }
 }
 
-/// 单个字符按 dart 的标识符转义规则写回：控制字符/标识符起点的数字用 `\hex `（带终止空格），
-/// 其余可打印字符用 `\c`，字母数字原样。
+/// Write back a single character per dart's identifier escaping rules: control
+/// characters and digits at the start of an identifier use `\hex ` (with a terminator
+/// space), other printable characters use `\c`, and alphanumerics stay as is.
 fn push_escaped_char(out: &mut String, ch: Option<char>, value_start: bool, protect: &mut usize) {
     let Some(ch) = ch else {
         out.push('\u{FFFD}');
@@ -549,8 +573,9 @@ fn push_escaped_char(out: &mut String, ch: Option<char>, value_start: bool, prot
     }
 }
 
-/// `@supports` 的条件是**结构化**的（dart 的 `SupportsCondition`），不是字符串：
-/// 冗余括号在解析期就消失，序列化时按节点类型决定要不要补括号。
+/// `@supports` conditions are **structured** (dart's `SupportsCondition`), not plain
+/// text: redundant parentheses disappear at parse time, and serialization decides per
+/// node type whether parentheses are needed.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum SuppOp {
     And,
@@ -580,7 +605,7 @@ enum Supports {
         name: String,
         value: String,
     },
-    /// `selector(:has(a))` / `foo(bar)`：函数形态原样保留实参。
+    /// `selector(:has(a))` / `foo(bar)`: the function form keeps its arguments verbatim.
     Function {
         name: String,
         args: String,
@@ -591,20 +616,22 @@ enum Supports {
         left: Box<Supports>,
         right: Box<Supports>,
     },
-    /// `#{}` 插值出来的裸条件。
+    /// A bare condition produced by `#{}` interpolation.
     Raw(String),
 }
 
 enum SuppFail {
-    /// 句法错误：位置（相对 prelude 的字节偏移）+ 文案。
+    /// Syntax error: position (byte offset relative to the prelude) + message.
     At(usize, String),
-    /// 本实现还认不出的形态：退回纯文本规范化（不静默改写）。
+    /// A shape this implementation does not recognize yet: fall back to plain text
+    /// normalization (never silently rewrite).
     Unsupported,
 }
 
 type SuppResult<T> = Result<T, SuppFail>;
 
-/// 把 `@supports` 的 prelude 解析成条件结构，再按 dart 的规则打印。
+/// Parse an `@supports` prelude into a condition structure, then print it following
+/// dart's rules.
 pub(super) fn supports_prelude(
     prelude: &str,
     eval: &mut Evaluator<'_>,
@@ -662,7 +689,8 @@ impl SupportsParser<'_, '_, '_> {
         })
     }
 
-    /// 标识符（`and`/`or`/`not` 之类的关键字用）；转义序列原样吞掉。
+    /// An identifier (used for keywords such as `and`/`or`/`not`); escape sequences
+    /// are swallowed verbatim.
     fn ident(&mut self) -> Option<String> {
         if !self.at_ident_start() {
             return None;
@@ -694,9 +722,10 @@ impl SupportsParser<'_, '_, '_> {
         Ok(condition)
     }
 
-    /// `[not] cond (and|or cond)*`：dart 要求同级运算符**同种**，混用报 `Expected "and".`
+    /// `[not] cond (and|or cond)*`: dart requires operators at the same level to be of
+    /// the **same kind**; mixing them reports `Expected "and".`
     fn condition(&mut self) -> SuppResult<Supports> {
-        // 顶层的 `not` 是前缀（`@supports not (a: b)`），不是标识符。
+        // A top-level `not` is a prefix (`@supports not (a: b)`), not an identifier.
         let save = self.pos;
         if self.at_ident_start() {
             if let Some(word) = self.ident() {
@@ -741,7 +770,8 @@ impl SupportsParser<'_, '_, '_> {
     fn in_parens(&mut self) -> SuppResult<Supports> {
         self.skip_ws();
         let start = self.pos;
-        // `selector(...)` / `foo(bar)`：标识符 + 括号。裸标识符只能是插值出来的条件。
+        // `selector(...)` / `foo(bar)`: identifier + parentheses. A bare identifier can
+        // only be a condition produced by interpolation.
         if self.at_ident_start() {
             let Some(name) = self.ident() else {
                 return Err(SuppFail::Unsupported);
@@ -761,7 +791,8 @@ impl SupportsParser<'_, '_, '_> {
                 self.pos = end + 1;
                 return Ok(Supports::Function { name, args });
             }
-            // 裸标识符后面只能是 `and`/`or` 或结束，否则本实现不认（退回原文）。
+            // A bare identifier may only be followed by `and`/`or` or the end; otherwise
+            // this implementation does not accept it (fall back to the raw text).
             let save = self.pos;
             self.skip_ws();
             let rest_ok = self.pos == self.text.len()
@@ -797,7 +828,8 @@ impl SupportsParser<'_, '_, '_> {
             }
             self.pos = save;
         }
-        // `((cond))`：括号只是分组，直接消失（dart 在解析期就丢掉）。
+        // `((cond))`: parentheses are only grouping and simply disappear (dart drops them
+        // at parse time).
         if self.peek() == Some('(') {
             let inner = self.condition()?;
             if !self.eat(')') {
@@ -825,7 +857,8 @@ impl SupportsParser<'_, '_, '_> {
         Ok(Supports::Declaration { name, value })
     }
 
-    /// 当前所在的 `(` 组的匹配 `)` 位置（组内已按 `(`/`)`、引号、转义平衡）。
+    /// Position of the matching `)` of the current `(` group (balanced inside the group
+    /// by `(`/`)`, quotes and escapes).
     fn group_end(&self) -> SuppResult<Option<usize>> {
         let bytes = self.text.as_bytes();
         let mut depth = 0usize;
@@ -861,15 +894,17 @@ impl SupportsParser<'_, '_, '_> {
         Ok(None)
     }
 
-    /// 声明里的名字/值都按 SassScript 求值（dart 的 `evaluateToCss`）；认不出时保留原文。
+    /// Both the name and the value of a declaration are evaluated as SassScript
+    /// (dart's `evaluateToCss`); when that fails the raw text is kept.
     fn evaluate(&mut self, text: &str, offset: usize) -> SuppResult<String> {
         if text.is_empty() {
             return Ok(String::new());
         }
         match self.eval.eval_text(text, self.base + offset) {
             Ok(value) => Ok(value.to_css().unwrap_or_else(|_| text.to_string())),
-            // 求值期的真实错误（未定义变量/非法运算）要报出去；解析不了的 CSS 值按原文保留
-            // （等价于 dart 的 `SupportsAnything` 兜底）。
+            // Real evaluation errors (undefined variable / invalid operation) are
+            // reported; CSS values that cannot be parsed are kept as raw text
+            // (equivalent to dart's `SupportsAnything` fallback).
             Err(error) if error.message.starts_with("Undefined") => {
                 Err(SuppFail::At(offset, error.message))
             }
@@ -882,12 +917,13 @@ fn leading_ws(text: &str) -> usize {
     text.len() - text.trim_start().len()
 }
 
-/// `open` 处是 `(` 时，返回配对 `)` 的位置（跳过引号与转义）。
+/// When `open` points at `(`, return the position of the matching `)` (skipping quotes
+/// and escapes).
 fn paren_end(text: &str, open: usize) -> Option<usize> {
     crate::text::matching(text, open).map(|end| end - 1)
 }
 
-/// 组内第一个**顶层** `:`（跳过引号、括号、转义）。
+/// The first **top-level** `:` of the group (skipping quotes, parentheses and escapes).
 fn top_level_colon(text: &str) -> Option<usize> {
     let bytes = text.as_bytes();
     let mut depth = 0usize;
@@ -912,7 +948,7 @@ fn top_level_colon(text: &str) -> Option<usize> {
             b'(' | b'[' => depth += 1,
             b')' | b']' => depth = depth.saturating_sub(1),
             b':' if depth == 0 => {
-                // `::` 之类不是声明分隔符
+                // `::` and the like are not declaration separators
                 if bytes.get(i + 1) != Some(&b':') {
                     return Some(i);
                 }
@@ -925,9 +961,10 @@ fn top_level_colon(text: &str) -> Option<usize> {
     None
 }
 
-/// dart 的序列化规则：整条件直接打印；作为 `and`/`or`/`not` 的操作数时，
-/// **Negation 恒定加括号**，**Operation 只在运算符不同（或处于 `not` 下）时加括号**，
-/// 声明/函数/插值不加。
+/// dart's serialization rules: a whole condition is printed directly; as an operand of
+/// `and`/`or`/`not`, **a Negation always gets parentheses** and **an Operation only
+/// gets parentheses when the operator differs (or under `not`)**, while
+/// declarations/functions/interpolations get none.
 fn write_supports(condition: &Supports) -> String {
     match condition {
         Supports::Declaration { name, value } => format!("({name}: {value})"),

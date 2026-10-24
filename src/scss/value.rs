@@ -1,7 +1,9 @@
-//! Sass 类型化值模型：数字（复合单位）、颜色、字符串、list / map、函数值。
+//! The typed Sass value model: numbers (compound units), colors, strings, list / map,
+//! function values.
 //!
-//! 与 less 的字符串式值不同，这里每个值都带语义，序列化规则对齐 dart-sass 1.35.2：
-//! 数字 10 位小数、颜色字面量保留原拼写、字符串选转义更少的引号。
+//! Unlike the string-based values of less, every value here carries semantics, and the
+//! serialization rules match dart-sass 1.35.2: numbers use 10 decimal places, color
+//! literals keep their spelling, and strings pick the quote style with fewer escapes.
 
 use std::cell::Cell;
 use std::rc::Rc;
@@ -10,7 +12,8 @@ use oxc_css_parser::ast::*;
 
 use super::color_space::{self, Space};
 
-/// 值模型。`Raw` 承载无法结构化解释的原文（`progid:`、url、unicode-range 等）。
+/// The value model. `Raw` carries text that cannot be interpreted structurally
+/// (`progid:`, url, unicode-range and so on).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) enum Value {
     Number(Number),
@@ -22,31 +25,34 @@ pub(crate) enum Value {
     Map(Map),
     ArgList(ArgList),
     Function(Function),
-    /// `get-function("name")` 得到的一等函数值（`call()` 的目标）。
+    /// A first-class function value obtained from `get-function("name")` (the target of
+    /// `call()`).
     FuncRef(FuncRef),
     Raw(String),
 }
 
-/// 一等函数：名字 + 来源（内置模块成员 / 用户模块命名空间 / 纯 CSS 函数）。
+/// A first-class function: name + origin (built-in module member / user module namespace
+/// / plain CSS function).
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct FuncRef {
     pub(crate) name: String,
-    /// 内置模块成员（`meta.get-function("div", $module: "math")`）。
+    /// A built-in module member (`meta.get-function("div", $module: "math")`).
     pub(crate) module: Option<crate::scss::modules::Builtin>,
-    /// 用户模块的命名空间。
+    /// The namespace of a user module.
     pub(crate) namespace: Option<String>,
-    /// `$css: true`：调用时原样产出 CSS 函数。
+    /// `$css: true`: emit a plain CSS function call as is.
     pub(crate) css: bool,
 }
 
-/// list 分隔符。逗号/空格/slash 分别输出 `, ` / ` ` / ` / `。
+/// list separator. Comma/space/slash output `, ` / ` ` / ` / ` respectively.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Sep {
     Comma,
     Space,
-    /// 真正的斜杠 list（`list.slash()`），dart 序列化成 `1 / 2`。
+    /// A true slash list (`list.slash()`), which dart serializes as `1 / 2`.
     Slash,
-    /// 源码里写的 `a/b`：dart 把它当成「斜杠数 / 字符串」，序列化不带空格。
+    /// `a/b` as written in the source: dart treats it as a "slash number / string" and
+    /// serializes it without spaces.
     SlashTight,
 }
 
@@ -62,9 +68,11 @@ pub(crate) struct Map {
     pub(crate) entries: Vec<(Value, Value)>,
 }
 
-/// 参数列表（`$args...`）：多出的位置实参 + 未被形参认领的关键字实参。
-/// `keywords_accessed` 记录“有没有人读过关键字 map”（`keywords($args)` 或再 `...` 展开），
-/// dart 用它决定要不要报「多余的命名实参」（实测：读过就不报）。
+/// Parameter list (`$args...`): the extra positional arguments + the keyword arguments not
+/// claimed by any parameter.
+/// `keywords_accessed` records "whether anyone read the keyword map" (`keywords($args)` or
+/// another `...` expansion), and dart uses it to decide whether to report "extra named
+/// arguments" (observed: once read, nothing is reported).
 #[derive(Debug, Clone, Default)]
 pub(crate) struct ArgList {
     pub(crate) positional: Vec<Value>,
@@ -84,11 +92,12 @@ impl PartialEq for ArgList {
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Function {
     pub(crate) name: String,
-    /// 实参：通常是逗号 list。
+    /// Arguments: usually a comma list.
     pub(crate) args: Box<Value>,
 }
 
-/// 去掉 `=` 两侧空白（函数实参里的 `opacity = 65` → `opacity=65`）。
+/// Remove the whitespace on both sides of `=` (`opacity = 65` in function arguments ->
+/// `opacity=65`).
 pub(crate) fn strip_eq_spaces(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut pending_space = false;
@@ -136,26 +145,30 @@ pub(crate) fn strip_eq_spaces(text: &str) -> String {
 pub(crate) struct SassStr {
     pub(crate) text: String,
     pub(crate) quoted: bool,
-    /// 从 CSS 源里解出的标识符：序列化时按 CSS 转义规则重写（`\9` → `\9 `）。
-    /// 计算/插值产生的字符串是「已就绪的文本」，原样输出。
+    /// An identifier decoded from CSS source: re-serialized per the CSS escaping rules
+    /// (`\9` -> `\9 `).
+    /// Strings produced by computation/interpolation are "ready text" and are output as is.
     pub(crate) escape: bool,
 }
 
-/// 数字 + 单位代数：`numer` / `denom` 都按出现顺序保存原始单位拼写。
+/// Number + unit algebra: both `numer` / `denom` keep the original unit spelling in
+/// order of appearance.
 ///
-/// `2px * 3px` → `6px*px`；`10px / 2px` → `5`；复合单位不能直接进 CSS（dart-sass 报错），
-/// 但 `inspect()` 需要能打印。
+/// `2px * 3px` -> `6px*px`; `10px / 2px` -> `5`; compound units cannot go into CSS
+/// directly (dart-sass errors), but `inspect()` must be able to print them.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Number {
     pub(crate) value: f64,
     pub(crate) numer: Vec<String>,
     pub(crate) denom: Vec<String>,
-    /// `1/2` 这类「斜杠数」：值已算出，但 CSS 输出保留原始两侧拼写。
-    /// dart-sass 用 `SassNumber.withSlash` 表达同一语义。
+    /// A "slash number" such as `1/2`: the value is computed, but the CSS output keeps the
+    /// original spelling on both sides.
+    /// dart-sass expresses the same semantics with `SassNumber.withSlash`.
     pub(crate) slash: Option<Box<(Value, Value)>>,
 }
 
-/// 颜色：同时保留「原始字面量拼写」和 RGBA。字面量原样输出，计算值才规范化。
+/// A color: keeps both the "original literal spelling" and the RGBA value. Literals are
+/// output as is; only computed values are normalized.
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct Color {
     pub(crate) r: f64,
@@ -163,13 +176,15 @@ pub(crate) struct Color {
     pub(crate) b: f64,
     pub(crate) a: f64,
     pub(crate) literal: Option<String>,
-    /// 来自 HSL 运算的颜色会带上原始 HSL 分量（度 / 百分比），后续 HSL 运算
-    /// 直接用它，而不是从取整后的 RGB 反推（dart 的 `_hue/_saturation/_lightness`）。
+    /// Colors coming from HSL operations carry their original HSL components (degrees /
+    /// percentages), and later HSL operations use them directly instead of deriving them
+    /// back from the rounded RGB (dart's `_hue/_saturation/_lightness`).
     pub(crate) hsl: Option<(f64, f64, f64)>,
-    /// 颜色所属空间（`color.space()`）：legacy 是 rgb/hsl/hwb，现代构造是各自的。
+    /// The space the color belongs to (`color.space()`): rgb/hsl/hwb for legacy, the
+    /// respective one for modern constructions.
     pub(crate) space: Option<Space>,
-    /// 非 legacy 空间的原始通道（`None` 是 CSS 的 `none`/missing）。
-    /// `hsl` 空间用上面的 `hsl` 字段（避免取整损失）。
+    /// Original channels of a non-legacy space (`None` is CSS's `none`/missing).
+    /// The `hsl` space uses the `hsl` field above (to avoid rounding loss).
     pub(crate) channels: Option<[Option<f64>; 3]>,
 }
 
@@ -193,7 +208,8 @@ impl Number {
         }
     }
 
-    /// `unit` 按最终 CSS 形态给出（调用方负责转义）；`%` 直接传 `"%"`。
+    /// `unit` is given in its final CSS form (escaping is the caller's job); `%` is passed
+    /// through as `"%"`.
     pub(crate) fn with_unit(value: f64, unit: &str) -> Self {
         Self {
             value,
@@ -203,7 +219,8 @@ impl Number {
         }
     }
 
-    /// 除法的原始写法：结果按数值计算，但序列化用两侧的 `inspect()`。
+    /// The original spelling of a division: the result is computed numerically, but
+    /// serialization uses the `inspect()` of both sides.
     pub(crate) fn with_slash(result: Self, left: Value, right: Value) -> Self {
         Self {
             slash: Some(Box::new((left, right))),
@@ -211,7 +228,8 @@ impl Number {
         }
     }
 
-    /// 去掉斜杠写法（变量赋值 / 参与运算时 dart-sass 会调 `withoutSlash()`）。
+    /// Drop the slash spelling (dart-sass calls `withoutSlash()` on assignment / when
+    /// taking part in an operation).
     pub(crate) fn without_slash(mut self) -> Self {
         self.slash = None;
         self
@@ -221,7 +239,8 @@ impl Number {
         self.numer.is_empty() && self.denom.is_empty()
     }
 
-    /// 是否是「简单单位」：无单位或单个分子单位。只有这种值能直接进 CSS。
+    /// Whether this is a "simple unit": unitless or a single numerator unit. Only such
+    /// values can go into CSS directly.
     pub(crate) fn is_simple(&self) -> bool {
         self.denom.is_empty() && self.numer.len() <= 1
     }
@@ -230,7 +249,8 @@ impl Number {
         self.numer.first().map(String::as_str).unwrap_or("")
     }
 
-    /// 单位串：`px*px/s*s`。单位按最终 CSS 形态保存（`px`、`%`、`px\9 `）。
+    /// Unit string: `px*px/s*s`. Units are stored in their final CSS form (`px`, `%`,
+    /// `px\9 `).
     pub(crate) fn unit_string(&self) -> String {
         let mut out = self.numer.join("*");
         if !self.denom.is_empty() {
@@ -240,7 +260,8 @@ impl Number {
         out
     }
 
-    /// 数字（不含单位）的 CSS 文本：10 位小数、去尾零、大整数完整展开。
+    /// CSS text of the number (without unit): 10 decimal places, trailing zeros removed,
+    /// large integers fully expanded.
     pub(crate) fn format_value(value: f64) -> String {
         if value.is_nan() {
             return "NaN".to_string();
@@ -248,8 +269,8 @@ impl Number {
         if value.is_infinite() {
             return if value > 0.0 { "Infinity" } else { "-Infinity" }.to_string();
         }
-        // dart-sass 把 double 的最短十进制表示四舍五入到 10 位小数
-        // （字符串级 half-up：1.23456789015 → 1.2345678902）。
+        // dart-sass rounds the shortest decimal representation of the double to 10 decimal
+        // places (string-level half-up: 1.23456789015 -> 1.2345678902).
         let mut text = format!("{value}");
         if text.contains('e') || text.contains('E') {
             text = expand_exponent(&text);
@@ -258,13 +279,14 @@ impl Number {
         if text == "-0" { "0".to_string() } else { text }
     }
 
-    /// 带单位的 CSS 文本。复合单位由调用方先报错。
+    /// CSS text with units. Compound units are reported by the caller first.
     pub(crate) fn format(&self) -> String {
         if let Some(boxed) = &self.slash {
             let (left, right) = &**boxed;
             return format!("{}/{}", left.inspect(), right.inspect());
         }
-        // 复合单位按 dart 的调试写法：`px*px`、`px*s^-1`（错误文案要对齐）。
+        // Compound units use dart's debug notation: `px*px`, `px*s^-1` (the error message
+        // must match).
         let mut out = Self::format_value(self.value);
         let mut parts: Vec<String> = self.numer.clone();
         parts.extend(self.denom.iter().map(|unit| format!("{unit}^-1")));
@@ -280,12 +302,13 @@ impl Number {
         self.arith(rhs, 1.0, -1.0)
     }
 
-    /// 加减：单位必须可换算（同单位或同量纲），否则报错。
+    /// Addition/subtraction: the units must be convertible (same unit or same dimension),
+    /// otherwise it is an error.
     fn arith(&self, rhs: &Self, lhs_scale: f64, rhs_scale: f64) -> ValResult<Self> {
         let (lhs_value, rhs_value, numer, denom) = if self.is_unitless() && rhs.is_unitless() {
             (self.value, rhs.value, Vec::new(), Vec::new())
         } else if self.is_unitless() || rhs.is_unitless() {
-            // 无单位值沿用另一侧的单位（dart-sass: 1 + 1px == 2px）。
+            // A unitless value takes the other side's unit (dart-sass: 1 + 1px == 2px).
             let (numer, denom) = if self.is_unitless() {
                 (rhs.numer.clone(), rhs.denom.clone())
             } else {
@@ -364,7 +387,8 @@ impl Number {
                 ));
             }
         };
-        // dart-sass `moduloLikeSass`：符号跟随除数（Dart `%` 是非负余数）。
+        // dart-sass `moduloLikeSass`: the sign follows the divisor (Dart's `%` is a
+        // non-negative remainder).
         let value = if rhs_value > 0.0 {
             self.value % rhs_value
         } else if rhs_value == 0.0 {
@@ -381,7 +405,8 @@ impl Number {
         })
     }
 
-    /// 把 `rhs` 换算成本单位的数值（dart-sass `_coerceUnits`，coerceUnitless=true）。
+    /// Convert `rhs` into a number in this unit (dart-sass `_coerceUnits`,
+    /// coerceUnitless=true).
     pub(crate) fn coerce(&self, rhs: &Self) -> ValResult<f64> {
         if self.numer == rhs.numer && self.denom == rhs.denom {
             return Ok(rhs.value);
@@ -401,7 +426,8 @@ impl Number {
         ))
     }
 
-    /// 比较：单位需兼容；无单位与有单位按数值比较。
+    /// Comparison: the units must be compatible; a unitless and a united value compare by
+    /// their numeric value.
     pub(crate) fn compare(&self, rhs: &Self) -> ValResult<std::cmp::Ordering> {
         let rhs_value = if self.numer == rhs.numer && self.denom == rhs.denom {
             rhs.value
@@ -421,11 +447,12 @@ impl Number {
         };
         self.value
             .partial_cmp(&rhs_value)
-            .ok_or_else(|| "无法比较的数字。".to_string())
+            .ok_or_else(|| "Numbers cannot be compared.".to_string())
     }
 }
 
-/// 十进制字符串按 `places` 位小数四舍五入（half-up），再去掉尾随零。
+/// Round a decimal string to `places` decimal places (half-up), then strip trailing
+/// zeros.
 fn round_decimal(text: &str, places: usize) -> String {
     let (sign, body) = match text.strip_prefix('-') {
         Some(rest) => ("-", rest),
@@ -480,7 +507,7 @@ fn round_decimal(text: &str, places: usize) -> String {
     }
 }
 
-/// 把 `1e21` / `1e-7` 展开成定点十进制。
+/// Expand `1e21` / `1e-7` into a fixed-point decimal.
 fn expand_exponent(text: &str) -> String {
     let negative = text.starts_with('-');
     let body = text.trim_start_matches('-');
@@ -530,7 +557,8 @@ fn cancel(mut numer: Vec<String>, mut denom: Vec<String>) -> (Vec<String>, Vec<S
     (numer, denom)
 }
 
-/// 同量纲单位换算因子：`rhs` 单位的值 * factor = 以 `lhs` 单位表示的值。
+/// Conversion factor between units of the same dimension: the value in `rhs` unit times
+/// factor = the value expressed in `lhs` unit.
 fn convert_factor(rhs: &str, lhs: &str) -> Option<f64> {
     if rhs == lhs {
         return Some(1.0);
@@ -540,12 +568,14 @@ fn convert_factor(rhs: &str, lhs: &str) -> Option<f64> {
     (rg == lg).then_some(rf / lf)
 }
 
-/// 同量纲单位换算因子（供 `@for` 的边界换算复用）。
+/// Conversion factor between units of the same dimension (also reused for the bound
+/// conversion of `@for`).
 pub(crate) fn convert_factor_public(rhs: &str, lhs: &str) -> Option<f64> {
     convert_factor(rhs, lhs)
 }
 
-/// 单位量纲与其换算表（dart 报错文案里的顺序）：`("length", ["in", ...])`。
+/// Unit dimensions and their conversion table (in the order used by dart's error
+/// messages): `("length", ["in", ...])`.
 pub(crate) fn unit_kind_names(unit: &str) -> Option<(&'static str, &'static [&'static str])> {
     let (kind, _) = unit_kind(unit)?;
     let names: &'static [&'static str] = match kind {
@@ -583,7 +613,8 @@ fn unit_kind(unit: &str) -> Option<(&'static str, f64)> {
     })
 }
 
-/// dart 的 `fuzzyLessThan`：`0.4999999999999` 与 `0.5` 视为相等（不取整成「小」）。
+/// dart's `fuzzyLessThan`: `0.4999999999999` counts as equal to `0.5` (it is not
+/// rounded down to "less").
 pub(crate) fn fuzzy_round(value: f64) -> f64 {
     const EPSILON: f64 = 1e-11;
     let fraction = value % 1.0;
@@ -601,8 +632,9 @@ pub(crate) fn fuzzy_round(value: f64) -> f64 {
 }
 
 impl Color {
-    /// 通道按 f64 原样存储（dart 1.93 的 `SassColor.rgbInternal`）：链式运算
-    /// 不丢精度，只在 `to_css()` 序列化时取整。
+    /// Channels are stored raw as f64 (dart 1.93's `SassColor.rgbInternal`): chained
+    /// operations keep full precision, and rounding only happens when `to_css()`
+    /// serializes.
     pub(crate) fn new(r: f64, g: f64, b: f64, a: f64) -> Self {
         Self {
             r,
@@ -616,7 +648,7 @@ impl Color {
         }
     }
 
-    /// 从 `#rgb` / `#rrggbb` / `#rrggbbaa` 解析；保留原字面量拼写。
+    /// Parse `#rgb` / `#rrggbb` / `#rrggbbaa`; the original literal spelling is kept.
     pub(crate) fn from_hex(raw: &str) -> Option<Self> {
         let hex = raw.strip_prefix('#')?;
         let digits: Vec<u8> = hex
@@ -624,7 +656,7 @@ impl Color {
             .map(|c| c.to_digit(16).map(|d| d as u8))
             .collect::<Option<Vec<_>>>()?;
         let nibble = |i: usize| digits[i] as f64;
-        // 6/8 位写法是「两位一组」的字节，不是 nibble。
+        // The 6/8 digit forms are two-hex-digit bytes, not nibbles.
         let byte = |i: usize| digits[2 * i] as f64 * 16.0 + digits[2 * i + 1] as f64;
         let (r, g, b, a) = match digits.len() {
             3 => (nibble(0) * 17.0, nibble(1) * 17.0, nibble(2) * 17.0, 1.0),
@@ -650,7 +682,7 @@ impl Color {
         })
     }
 
-    /// 颜色名（大小写不敏感）。字面量拼写由调用方保留。
+    /// Color name (case-insensitive). The literal spelling is kept by the caller.
     pub(crate) fn from_name(name: &str) -> Option<Self> {
         let lower = name.to_ascii_lowercase();
         if lower == "transparent" {
@@ -669,7 +701,7 @@ impl Color {
             })
     }
 
-    /// 序列化取整：四舍五入到最近整数（dart 的 `fuzzyRound`）。
+    /// Serialization rounds to the nearest integer (dart's `fuzzyRound`).
     fn rounded(&self) -> (u8, u8, u8) {
         let ch = |v: f64| fuzzy_round(v).clamp(0.0, 255.0) as u8;
         (ch(self.r), ch(self.g), ch(self.b))
@@ -701,12 +733,12 @@ impl Color {
         format!("rgba({r}, {g}, {b}, {})", Number::format_value(self.a))
     }
 
-    /// `color.space()`：显式空间优先，其次是 legacy 的 hsl/hwb 标记。
+    /// `color.space()`: an explicit space wins, then the legacy hsl/hwb markers.
     pub(crate) fn space(&self) -> Space {
         self.space.unwrap_or(Space::Rgb)
     }
 
-    /// 当前空间的通道（显示单位；`None` 表示 missing）。
+    /// Channels of the current space (display units; `None` means missing).
     pub(crate) fn origin_channels(&self) -> [Option<f64>; 3] {
         let space = self.space();
         if let Some(channels) = self.channels {
@@ -728,7 +760,8 @@ impl Color {
         [self.r / 255.0, self.g / 255.0, self.b / 255.0]
     }
 
-    /// 显示单位 → 空间数学单位（`oklab`/`oklch` 的 lightness 数学上是 0..1）。
+    /// Display units -> math units of the space (the lightness of `oklab`/`oklch` is 0..1
+    /// mathematically).
     pub(crate) fn math_to_display(space: Space, ch: [f64; 3]) -> [f64; 3] {
         match space {
             Space::Rgb => ch.map(|c| c * 255.0),
@@ -753,7 +786,8 @@ impl Color {
         }
     }
 
-    /// 现代构造：通道按显示单位存，RGB 走 `Color::new` 的取整与字面量规则。
+    /// Modern construction: channels are stored in display units, and the RGB goes through
+    /// the rounding and literal rules of `Color::new`.
     pub(crate) fn from_space(space: Space, channels: [Option<f64>; 3], alpha: f64) -> Self {
         let filled = [
             channels[0].unwrap_or(0.0),
@@ -767,7 +801,7 @@ impl Color {
         color
     }
 
-    /// 转到另一个空间（`color.to-space()`）。
+    /// Convert to another space (`color.to-space()`).
     pub(crate) fn to_space(&self, space: Space) -> Self {
         let from = self.space();
         if from == space {
@@ -782,8 +816,9 @@ impl Color {
         let converted = color_space::convert(from, space, Self::to_math(from, filled));
         let display = Self::from_math(space, converted);
         let rgb = color_space::to_srgb(space, Self::to_math(space, display));
-        // 颜色在**目标空间**里存：legacy 目标也记 `space`，否则 `channel($c, "hue", hsl)`
-        // 会退化回 RGB 通道；序列化那侧仍按 legacy 规则（十六进制）。
+        // The color is stored in the **target space**: a legacy target records `space` too,
+        // otherwise `channel($c, "hue", hsl)` would fall back to RGB channels; the
+        // serialization side still follows the legacy rules (hex).
         let mut color = Self::new(rgb[0] * 255.0, rgb[1] * 255.0, rgb[2] * 255.0, self.a);
         color.space = Some(space);
         color.channels = Some([Some(display[0]), Some(display[1]), Some(display[2])]);
@@ -793,7 +828,8 @@ impl Color {
         color
     }
 
-    /// 非 legacy 空间按自身空间序列化（`lab()` / `oklch()` / `color()`）。
+    /// A non-legacy space is serialized in its own space (`lab()` / `oklch()` /
+    /// `color()`).
     fn to_css_space(&self, space: Space) -> String {
         let channels = self.origin_channels();
         let text = (0..3)
@@ -839,7 +875,8 @@ impl SassStr {
         }
     }
 
-    /// 从 CSS 源文件里读出的标识符（需要按 CSS 转义规则序列化）。
+    /// An identifier read from a CSS source file (must be serialized per the CSS escaping
+    /// rules).
     pub(crate) fn ident(text: impl Into<String>) -> Self {
         Self {
             text: text.into(),
@@ -859,8 +896,9 @@ impl SassStr {
     }
 }
 
-/// 只在字符串含 `"` 且不含 `'` 时用单引号（dart 的 `_visitQuotedString`：先按
-/// 双引号扫描，遇到 `"` 又已经出现 `'` 时整体重来并强制双引号）。
+/// Use single quotes only when the string contains `"` and no `'` (dart's
+/// `_visitQuotedString`: scan with double quotes first, and when a `"` is found while a `'`
+/// has already appeared, start over and force double quotes).
 pub(crate) fn quote_string(text: &str) -> String {
     let quote = if text.contains('"') && !text.contains('\'') {
         '\''
@@ -877,13 +915,15 @@ pub(crate) fn quote_string(text: &str) -> String {
                 out.push('\\');
                 out.push(c);
             }
-            // NUL 在 CSS 字符串里不合法：dart 写成 U+FFFD（标识符里则是 `\\0 `）。
+            // NUL is not legal in a CSS string: dart writes U+FFFD (in an identifier it is
+            // `\\0 ` instead).
             '\0' => out.push('\u{FFFD}'),
-            // 制表符原样写出（dart 的控制字符转义列表里没有 tab）。
+            // A tab is written as is (tab is not in dart's control-character escape list).
             '\t' => out.push('\t'),
             c if (c as u32) < 0x20 || c as u32 == 0x7f => {
                 out.push_str(&format!("\\{:x}", c as u32));
-                // 十六进制转义后面紧跟十六进制字符/空白时，补一个空格断句。
+                // When a hex escape is immediately followed by a hex digit/whitespace, add a
+                // space to terminate it.
                 if let Some(&next) = chars.get(i + 1) {
                     if next.is_ascii_hexdigit() || next == ' ' || next == '\t' {
                         out.push(' ');
@@ -898,7 +938,8 @@ pub(crate) fn quote_string(text: &str) -> String {
     out
 }
 
-/// 未加引号字符串/标识符的序列化：非法字符转义；结尾是十六进制转义时补空格。
+/// Serialization of unquoted strings/identifiers: illegal characters are escaped; a
+/// trailing hex escape gets a terminating space.
 pub(crate) fn escape_unquoted(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let chars: Vec<char> = text.chars().collect();
@@ -922,16 +963,17 @@ pub(crate) fn escape_unquoted(text: &str) -> String {
     out
 }
 
-/// dart-sass 的 `isPrivateUse`：BMP 私用区 U+E000–U+F8FF 与 15/16 平面。
+/// dart-sass's `isPrivateUse`: BMP private use area U+E000-U+F8FF and planes 15/16.
 ///
-/// 图标字体把它们当作字形码位（`content: "\e644"`），dart 在展开模式下总是写成
-/// 十六进制转义；不转义的话产物会带上非 ASCII 字节，进而多出一条 `@charset`。
+/// Icon fonts use them as glyph code points (`content: "\e644"`), and dart always writes
+/// them as hex escapes in expanded mode; without escaping, the output would carry non-ASCII
+/// bytes and an extra `@charset` would appear.
 fn is_private_use(ch: char) -> bool {
     matches!(ch as u32, 0xE000..=0xF8FF | 0xF0000..=0x10FFFF)
 }
 
-/// 未加引号字符串的最小转义：只把私用区写成十六进制转义，其余原样
-/// （dart 的 `_visitUnquotedString`）。
+/// Minimal escaping for unquoted strings: only the private use area becomes a hex escape,
+/// everything else is kept as is (dart's `_visitUnquotedString`).
 fn escape_private_use(text: &str) -> String {
     if !text.chars().any(is_private_use) {
         return text.to_string();
@@ -948,7 +990,8 @@ fn escape_private_use(text: &str) -> String {
     out
 }
 
-/// 把私用区字符写成十六进制转义；后面紧跟十六进制字符或空白时补一个空格断句。
+/// Write a private use character as a hex escape; add a terminating space when a hex digit
+/// or whitespace follows.
 fn push_private_use(out: &mut String, chars: &[char], i: usize) {
     out.push_str(&format!("\\{:x}", chars[i] as u32));
     if let Some(&next) = chars.get(i + 1) {
@@ -984,11 +1027,13 @@ impl Value {
         matches!(self, Value::Null)
     }
 
-    /// 作为 CSS 值输出。`null` 返回空串由声明层丢弃；map/空 list/复合单位报错。
+    /// Output as a CSS value. `null` returns an empty string and is dropped by the
+    /// declaration layer; maps / empty lists / compound units are errors.
     pub(crate) fn to_css(&self) -> ValResult<String> {
         Ok(match self {
-            // 带斜杠写法的数字直接按原写法输出（`10/4px`），即使复合单位不能算值
-            // —— dart 只在真正求值后才校验单位（`$x: 10/4px; a: $x` 才报错）。
+            // A number with slash spelling is output as written (`10/4px`), even if a
+            // compound unit cannot be a value -- dart only validates units after real
+            // evaluation (`$x: 10/4px; a: $x` is what errors).
             Value::Number(n) if n.slash.is_some() => n.format(),
             Value::Number(n) => {
                 if !n.is_simple() {
@@ -1015,7 +1060,8 @@ impl Value {
                 };
                 let mut parts = Vec::new();
                 for item in &list.items {
-                    // null 与空 list 在 list 序列化里是透明元素（`1 null` → `1`）。
+                    // null and the empty list are transparent elements in list serialization
+                    // (`1 null` -> `1`).
                     if item.is_null() {
                         continue;
                     }
@@ -1036,7 +1082,8 @@ impl Value {
                 if args.positional.is_empty() {
                     return Err("() isn't a valid CSS value.".to_string());
                 }
-                // `$rest` 用作值时就相当于一个逗号 list（dart 实测：`y: 2, 3`）。
+                // Used as a value, `$rest` is just a comma list (observed with dart:
+                // `y: 2, 3`).
                 Value::List(List {
                     items: args.positional.clone(),
                     sep: Sep::Comma,
@@ -1055,7 +1102,8 @@ impl Value {
         })
     }
 
-    /// 函数实参序列化：null 保留占位（`foo(null, 1)` → `foo(, 1)`），与值 list 不同。
+    /// Function argument serialization: null keeps its placeholder (`foo(null, 1)` ->
+    /// `foo(, 1)`), unlike a value list.
     pub(crate) fn to_css_args(&self) -> ValResult<String> {
         match self {
             Value::List(list) if list.sep == Sep::Comma && !list.bracketed => {
@@ -1073,14 +1121,17 @@ impl Value {
         }
     }
 
-    /// 插值 `#{}` 的文本：字符串取原文（去引号），其余同 CSS。
-    /// 插值文本：null 为空串；字符串给出裸文本；其余按 CSS 序列化。
-    /// map / 空 list 之类不能进 CSS 的值在这里就报错（dart 同样报错）。
+    /// Text of the `#{}` interpolation: strings use their raw text (quotes removed), the
+    /// rest is like CSS.
+    /// Interpolation text: null is an empty string; a string yields its bare text; the rest
+    /// is serialized as CSS.
+    /// Values that cannot go into CSS, such as maps / empty lists, error right here (dart
+    /// errors too).
     pub(crate) fn interpolation(&self) -> ValResult<String> {
         match self {
             Value::Null => Ok(String::new()),
             Value::Str(s) => Ok(s.text.clone()),
-            // 插值里 list 的成员同样不引号。
+            // List members in an interpolation are unquoted as well.
             Value::List(list) if !list.items.is_empty() => {
                 let sep = match list.sep {
                     Sep::Comma => ", ",
@@ -1108,7 +1159,7 @@ impl Value {
         }
     }
 
-    /// 变量赋值时 dart-sass 调 `withoutSlash()`（list 递归）。
+    /// On variable assignment dart-sass calls `withoutSlash()` (recursively through lists).
     pub(crate) fn without_slash(&self) -> Value {
         match self {
             Value::Number(n) => Value::Number(n.clone().without_slash()),
@@ -1117,7 +1168,7 @@ impl Value {
         }
     }
 
-    /// `inspect()`：调试表示，复合单位在这里可见（`6px*px`）。
+    /// `inspect()`: the debug representation, where compound units are visible (`6px*px`).
     pub(crate) fn inspect(&self) -> String {
         match self {
             Value::Number(n) => n.format(),
@@ -1132,7 +1183,8 @@ impl Value {
                     Sep::Slash => " / ",
                     Sep::SlashTight => "/",
                 };
-                // dart 的 inspect：空 list 是 `()`，单元素逗号 list 带尾逗号 `(1,)`。
+                // dart's inspect: an empty list is `()`, a single-element comma list carries a
+                // trailing comma `(1,)`.
                 if list.items.is_empty() {
                     return if list.bracketed {
                         "[]".to_string()
@@ -1165,11 +1217,13 @@ impl Value {
                 format!("({body})")
             }
             Value::ArgList(args) => {
-                // dart 的 `inspect()` 只看位置实参（关键字实参不可见）：`()` 恒为 `()`。
+                // dart's `inspect()` only looks at positional arguments (keyword arguments are
+                // invisible): `()` is always `()`.
                 if args.positional.is_empty() {
                     "()".to_string()
                 } else if args.positional.len() == 1 {
-                    // dart：单元素逗号 list 的 inspect 带尾逗号（`(2px,)`）。
+                    // dart: the inspect of a single-element comma list has a trailing comma
+                    // (`(2px,)`).
                     format!("({},)", args.positional[0].inspect())
                 } else {
                     args.positional
@@ -1188,7 +1242,7 @@ impl Value {
     }
 }
 
-/// 二元算术（dart-sass 的 Value 方法语义）。
+/// Binary arithmetic (the semantics of dart-sass's Value methods).
 pub(crate) const EPSILON: f64 = 1e-11;
 
 fn fuzzy_eq(a: f64, b: f64) -> bool {
@@ -1220,14 +1274,16 @@ fn undefined(op: &SassBinaryOperatorKind, lhs: &Value, rhs: &Value) -> String {
     )
 }
 
-/// 非数值运算的字符串拼接（dart-sass `Value.plus` / `SassString.plus`）。
+/// String concatenation for non-numeric operations (dart-sass `Value.plus` /
+/// `SassString.plus`).
 fn concat(lhs: &Value, rhs: &Value, op: &SassBinaryOperatorKind) -> Value {
     use SassBinaryOperatorKind::*;
     match (op, lhs) {
         (Plus, Value::Str(a)) => Value::Str(SassStr {
             text: match rhs {
                 Value::Str(b) => format!("{}{}", a.text, b.text),
-                // 右操作数是字符串时用它的引号形态（`1 + "x"` → `"1x"`）。
+                // When the right operand is a string, use its quoted form (`1 + "x"` ->
+                // `"1x"`).
                 other => format!(
                     "{}{}",
                     a.text,
@@ -1239,7 +1295,7 @@ fn concat(lhs: &Value, rhs: &Value, op: &SassBinaryOperatorKind) -> Value {
         }),
         (Plus, other) if matches!(rhs, Value::Str(_)) => {
             let Value::Str(b) = rhs else {
-                unreachable!("已由 guard 保证")
+                unreachable!("guaranteed by the guard")
             };
             Value::Str(SassStr {
                 text: format!(
@@ -1326,7 +1382,8 @@ pub(crate) fn binary(op: &SassBinaryOperatorKind, lhs: &Value, rhs: &Value) -> V
     })
 }
 
-/// 除法：数字相除；颜色涉及除法是未定义操作；其余按字符串拼接（dart 语义）。
+/// Division: numbers divide; division involving a color is an undefined operation; the
+/// rest concatenates as strings (dart semantics).
 pub(crate) fn binary_div(lhs: &Value, rhs: &Value) -> ValResult<Value> {
     match (lhs, rhs) {
         (Value::Number(a), Value::Number(b)) => Ok(Value::Number(a.div(b)?)),
@@ -1343,12 +1400,13 @@ pub(crate) fn binary_div(lhs: &Value, rhs: &Value) -> ValResult<Value> {
     }
 }
 
-/// 名字归一比较：`$a_b` ≡ `$a-b`（dart 的标识符规则）。
+/// Name comparison after normalization: `$a_b` ≡ `$a-b` (dart's identifier rules).
 pub(crate) fn names_eq(a: &str, b: &str) -> bool {
     a == b || (a.contains('_') || b.contains('_')) && a.replace('_', "-") == b.replace('_', "-")
 }
 
-/// list 语义：单值是一个 1 元素 list，`null` 也是 1 元素 list，map 是 `(k v)` 对的 list。
+/// List semantics: a single value is a 1-element list, `null` is a 1-element list too, and
+/// a map is a list of `(k v)` pairs.
 pub(crate) fn list_items(value: &Value) -> Option<Vec<Value>> {
     match value {
         Value::List(list) => Some(list.items.clone()),
@@ -1369,7 +1427,7 @@ pub(crate) fn list_items(value: &Value) -> Option<Vec<Value>> {
     }
 }
 
-/// map 语义：`()`（空 list）也是空 map（dart 的 `assertMap` 如此）。
+/// Map semantics: `()` (the empty list) is an empty map too (so does dart's `assertMap`).
 pub(crate) fn as_map(value: &Value, name: &str) -> ValResult<Vec<(Value, Value)>> {
     match value {
         Value::Map(map) => Ok(map.entries.clone()),
@@ -1379,7 +1437,7 @@ pub(crate) fn as_map(value: &Value, name: &str) -> ValResult<Vec<(Value, Value)>
 }
 
 impl Number {
-    /// `assertInt`：`1.5 is not an int.`
+    /// `assertInt`: `1.5 is not an int.`
     pub(crate) fn assert_int(&self, name: &str) -> ValResult<i64> {
         if (self.value - self.value.round()).abs() > EPSILON {
             return Err(format!("${name}: {} is not an int.", self.format()));
@@ -1387,7 +1445,7 @@ impl Number {
         Ok(self.value.round() as i64)
     }
 
-    /// dart `valueInRange`：越界报 `Expected 120 to be within 0 and 100.`
+    /// dart `valueInRange`: out of range reports `Expected 120 to be within 0 and 100.`
     pub(crate) fn value_in_range(&self, min: f64, max: f64, name: &str) -> ValResult<f64> {
         if self.value < min - EPSILON || self.value > max + EPSILON {
             return Err(format!(
@@ -1400,7 +1458,7 @@ impl Number {
         Ok(self.value)
     }
 
-    /// 角度参数换算成度（`1turn` → 360）。
+    /// Convert an angle argument to degrees (`1turn` -> 360).
     pub(crate) fn angle_degrees(&self, name: &str) -> ValResult<f64> {
         match self.unit() {
             "" | "deg" => Ok(self.value),
@@ -1416,12 +1474,12 @@ impl Number {
 }
 
 impl Color {
-    /// 未取整的 RGB 通道（参与运算用）。
+    /// Unrounded RGB channels (used for computation).
     pub(crate) fn channels_f64(&self) -> (f64, f64, f64) {
         (self.r, self.g, self.b)
     }
 
-    /// 取整后的 RGB 通道（`red()` / `ie-hex-str()` 与 `==` 的展示口径）。
+    /// Rounded RGB channels (the displayed form of `red()` / `ie-hex-str()` and `==`).
     pub(crate) fn channels(&self) -> (u8, u8, u8) {
         self.rounded()
     }
@@ -1464,7 +1522,7 @@ pub(crate) fn values_equal(lhs: &Value, rhs: &Value) -> bool {
     }
 }
 
-/// 单位能否换算的规范化形式：(量纲名, 乘数)。
+/// Normalized form of a convertible unit: (dimension name, multiplier).
 fn canonical_unit(unit: &str) -> (String, f64) {
     match unit_kind(unit) {
         Some((kind, factor)) => (kind.to_string(), factor),
@@ -1511,7 +1569,7 @@ impl Value {
 // AST → Value
 // ---------------------------------------------------------------------------
 
-/// 声明值：顶层逗号切分 → 空格切分 → slash 切分。
+/// A declaration value: split on top-level commas -> split on spaces -> split on slash.
 #[cfg(test)]
 pub(crate) fn from_components(src: &str, comps: &[ComponentValue]) -> ValResult<Value> {
     let groups = split_on(comps, DelimiterKind::Comma);
@@ -1529,7 +1587,8 @@ pub(crate) fn from_components(src: &str, comps: &[ComponentValue]) -> ValResult<
     space_list(src, comps)
 }
 
-/// 函数实参 / bracket 内容：逗号是分隔符，其余同声明值。
+/// Function arguments / bracket contents: a comma is a separator, the rest is like a
+/// declaration value.
 pub(crate) fn from_sequence(
     src: &str,
     comps: &[ComponentValue],
@@ -1584,7 +1643,8 @@ fn same_delim(a: &DelimiterKind, b: &DelimiterKind) -> bool {
     )
 }
 
-/// 空格分隔：空白只在「两侧都不是 slash」时断开（`1 / 2` 是 slash list）。
+/// Space separation: whitespace only splits when "neither side is a slash" (`1 / 2` is a
+/// slash list).
 fn space_list(src: &str, comps: &[ComponentValue]) -> ValResult<Value> {
     if comps.is_empty() {
         return Ok(Value::List(List {
@@ -1640,7 +1700,8 @@ fn slash_list(src: &str, comps: &[ComponentValue]) -> ValResult<Value> {
     if comps.len() == 1 {
         return from_component(src, &comps[0]);
     }
-    // 无空白但并列的组件（如函数名后面的 token）按空格 list 保底。
+    // Adjacent components without whitespace (such as the token after a function name) fall
+    // back to a space list.
     let items = comps
         .iter()
         .map(|c| from_component(src, c))
@@ -1660,7 +1721,8 @@ pub(crate) fn from_component(src: &str, comp: &ComponentValue) -> ValResult<Valu
             &escape_unquoted(d.unit.name),
         ))),
         ComponentValue::Percentage(p) => {
-            // `10\25`：转义写出来的百分号，dart-sass 保留转义（`10\%`）。
+            // `10\25`: a percent sign written as an escape, which dart-sass keeps escaped
+            // (`10\%`).
             if slice(src, p.span).contains('\\') {
                 return Ok(Value::Raw(format!(
                     "{}{}",
@@ -1684,7 +1746,8 @@ pub(crate) fn from_component(src: &str, comp: &ComponentValue) -> ValResult<Valu
         ComponentValue::HexColor(h) => {
             let raw = slice(src, h.span);
             if raw.contains('\\') {
-                // `#000\9`：dart-sass 把它切成颜色 + 转义标识符（中间补空格）。
+                // `#000\9`: dart-sass splits it into a color + an escaped identifier (a space
+                // is added in between).
                 if let Some((color, rest)) = split_escaped_hex(&raw) {
                     return Ok(Value::List(List {
                         items: vec![
@@ -1735,7 +1798,8 @@ pub(crate) fn from_component(src: &str, comp: &ComponentValue) -> ValResult<Valu
         }
         ComponentValue::SassMap(m) => {
             if m.items.is_empty() {
-                // dart-sass 把 `()` 解析成空 map，语义上按空 list 处理。
+                // dart-sass parses `()` as an empty map, and semantically it is treated as an
+                // empty list.
                 return Ok(Value::List(List {
                     items: Vec::new(),
                     sep: Sep::Space,
@@ -1756,11 +1820,15 @@ pub(crate) fn from_component(src: &str, comp: &ComponentValue) -> ValResult<Valu
         }
         ComponentValue::TokenWithSpan(t) => Ok(Value::Raw(slice(src, t.span))),
         ComponentValue::ImportantAnnotation(_) => Ok(Value::Raw(slice(src, *comp.span()))),
-        other => Err(format!("SCSS 值尚未支持: {}", slice(src, *other.span()))),
+        other => Err(format!(
+            "SCSS value not supported yet: {}",
+            slice(src, *other.span())
+        )),
     }
 }
 
-/// 把 `#000\9` 拆成 `(#000, "\\9")`；`#` 后只认 3/4/6/8 位十六进制。
+/// Split `#000\9` into `(#000, "\\9")`; only 3/4/6/8 hex digits are accepted after
+/// `#`.
 fn split_escaped_hex(raw: &str) -> Option<(Color, &str)> {
     let body = raw.strip_prefix('#')?;
     let digits = body.find('\\').unwrap_or(body.len());
@@ -1822,7 +1890,8 @@ fn function_value(src: &str, f: &oxc_css_parser::ast::Function<'_>) -> ValResult
         _ => return Ok(Value::Raw(slice(src, f.span))),
     };
     let lower = name.to_ascii_lowercase();
-    // calc / -webkit-calc：不是 SassScript，内部按原文保留（仅折叠空白）。
+    // calc / -webkit-calc: not SassScript, the inside is kept verbatim (only whitespace is
+    // collapsed).
     if lower == "calc" || lower.ends_with("-calc") {
         let inner = inner_text(src, f.span, &name);
         return Ok(Value::Raw(format!(
@@ -1831,14 +1900,16 @@ fn function_value(src: &str, f: &oxc_css_parser::ast::Function<'_>) -> ValResult
             collapse_ws(&inner)
         )));
     }
-    // `progid:...` 是 IE filter 的原文写法：整体透传（空白保留），只规范化字符串引号。
+    // `progid:...` is the verbatim form of an IE filter: passed through as is (whitespace
+    // kept), only the quotes of strings are normalized.
     if name.contains("progid") {
         return Ok(Value::Raw(normalize_raw(&requote_strings(&slice(
             src, f.span,
         )))));
     }
     if has_raw_args(&f.args) {
-        // 其余原文参数（`alpha(opacity=65)`）：`=` 两侧不留空格（dart-sass 实测）。
+        // Other verbatim arguments (`alpha(opacity=65)`): no spaces around `=` (observed
+        // with dart-sass).
         return Ok(Value::Raw(strip_eq_spaces(&rewrite_raw(src, f.span))));
     }
     let args = from_sequence(src, &f.args, false)?;
@@ -1851,8 +1922,8 @@ fn function_value(src: &str, f: &oxc_css_parser::ast::Function<'_>) -> ValResult
     }))
 }
 
-/// 透传的内置函数要沿用源码里的函数名大小写（bootstrap5 的 `RGBA(...)` 就是
-/// 为了绕开旧版 sass 的行为，dart 原样保留）。
+/// A passed-through built-in function keeps the function name casing from the source
+/// (bootstrap5's `RGBA(...)` exists to bypass old sass behavior, and dart keeps it as is).
 pub(crate) fn with_original_name(value: Value, name: &str, lower: &str) -> Value {
     if name == lower {
         return value;
@@ -1876,8 +1947,10 @@ pub(crate) fn with_original_name(value: Value, name: &str, lower: &str) -> Value
     }
 }
 
-/// 内置函数（S0 只做值序列化必需的几个；其余按未知函数透传）。
-/// 实参里出现「不是 SassScript 的原文」（`alpha(opacity=65)`、`url(...)`）。
+/// Built-in functions (S0 only implements the few needed for value serialization; the rest
+/// pass through as unknown functions).
+/// An argument contains "verbatim text that is not SassScript" (`alpha(opacity=65)`,
+/// `url(...)`).
 pub(crate) fn has_raw_args(args: &[ComponentValue]) -> bool {
     args.iter().any(|c| match c {
         ComponentValue::TokenWithSpan(_) => true,
@@ -1904,12 +1977,14 @@ fn inner_text(src: &str, span: oxc_css_parser::pos::Span, name: &str) -> String 
     text.get(open..close).unwrap_or("").to_string()
 }
 
-/// 折叠空白并规范化字符串引号（用于 calc / progid / url / at-rule prelude）。
+/// Collapse whitespace and normalize string quotes (used for calc / progid / url / at-rule
+/// prelude).
 pub(crate) fn rewrite_raw(src: &str, span: oxc_css_parser::pos::Span) -> String {
     normalize_raw(&requote_strings(&slice(src, span)))
 }
 
-/// 把原文里的字符串按 dart-sass 引号规则重写（少转义优先、平手用双引号）。
+/// Rewrite the strings in verbatim text by dart-sass's quoting rules (fewer escapes win;
+/// double quotes on a tie).
 pub(crate) fn requote_strings(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut chars = text.chars().peekable();
@@ -1943,7 +2018,7 @@ pub(crate) fn requote_strings(text: &str) -> String {
     out
 }
 
-/// 解码带引号的 CSS 字符串（含十六进制转义）。
+/// Decode a quoted CSS string (including hex escapes).
 pub(crate) fn decode_css_string(raw: &str) -> String {
     let inner = raw
         .strip_prefix('\'')
@@ -1956,7 +2031,7 @@ pub(crate) fn decode_css_string(raw: &str) -> String {
     decode_css_escapes(inner)
 }
 
-/// 解码字符串体里的转义（不含外层引号）。
+/// Decode the escapes inside a string body (without the surrounding quotes).
 pub(crate) fn decode_css_escapes(inner: &str) -> String {
     let mut out = String::with_capacity(inner.len());
     let chars: Vec<char> = inner.chars().collect();
@@ -1999,7 +2074,7 @@ pub(crate) fn decode_css_escapes(inner: &str) -> String {
     out
 }
 
-/// CSS 标识符判定（dart-sass 的 attribute selector 去引号规则）。
+/// CSS identifier check (used for dart-sass's attribute selector quote-removal rule).
 pub(crate) fn is_css_identifier(text: &str) -> bool {
     let mut chars = text.chars();
     let Some(first) = chars.next() else {
@@ -2059,7 +2134,8 @@ pub(crate) fn normalize_raw(text: &str) -> String {
     out
 }
 
-/// `calc()` 内部：折叠空白但保留首尾空格（dart-sass 实测）。
+/// Inside `calc()`: collapse whitespace but keep the leading/trailing ones (observed with
+/// dart-sass).
 pub(crate) fn collapse_ws(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut in_space = false;
@@ -2268,7 +2344,8 @@ mod tests {
 
     #[test]
     fn number_rounds_shortest_decimal() {
-        // dart-sass 是「最短十进制串再四舍五入到 10 位」，不是 f64 二进制四舍五入
+        // dart-sass takes the "shortest decimal string, then round to 10 places", not an
+        // f64 binary round
         assert_eq!(Number::format_value(1.23456789015), "1.2345678902");
         assert_eq!(Number::format_value(-1.23456789015), "-1.2345678902");
         assert_eq!(Number::format_value(0.99999999996), "1");
@@ -2283,7 +2360,7 @@ mod tests {
         let n = Number::with_unit(2.0, "px").mul(&Number::with_unit(3.0, "px"));
         assert_eq!(n.value, 6.0);
         assert_eq!(n.format(), "6px*px");
-        // 复合单位不能直接进 CSS（dart-sass 报错）
+        // Compound units cannot go into CSS directly (dart-sass errors)
         assert!(Value::Number(n).to_css().is_err());
 
         let d = Number::with_unit(10.0, "px")
@@ -2308,7 +2385,7 @@ mod tests {
                 .compare(&Number::with_unit(1.0, "em"))
                 .is_err()
         );
-        // 同量纲可换算
+        // Convertible within the same dimension
         let sum = Number::with_unit(1.0, "in")
             .add(&Number::with_unit(1.0, "px"))
             .unwrap();
@@ -2371,12 +2448,13 @@ mod tests {
 
     #[test]
     fn escaped_units_and_hex() {
-        // IE hack：`1px\9` 的单位是转义标识符，尾随空格必须保留
+        // IE hack: the unit of `1px\9` is an escaped identifier, so the trailing space must
+        // be kept
         assert_eq!(css("1px\\9"), "1px\\9 ");
         assert_eq!(css("1p\\9x"), "1p\\9 x");
         assert_eq!(css("1px\\9\\9"), "1px\\9 \\9 ");
         assert_eq!(css("c\\9"), "c\\9 ");
-        // 颜色 token 在转义处结束：`#000\9` = 颜色 + 转义标识符
+        // A color token ends at the escape: `#000\9` = color + escaped identifier
         assert_eq!(css("#000\\9"), "#000 \\9 ");
         assert_eq!(css("10\\25"), "10\\%");
     }
@@ -2384,6 +2462,6 @@ mod tests {
     #[test]
     fn ident_escaping() {
         assert_eq!(css("\\9"), "\\9 ");
-        assert_eq!(css("\\5FAE\\8F6F"), "微软");
+        assert_eq!(css("\\5FAE\\8F6F"), "\u{5FAE}\u{8F6F}");
     }
 }

@@ -1,8 +1,9 @@
-//! S2 特性 golden 对拍：`@mixin` / `@include` / `@content` / `@if`。
+//! S2 golden comparison: `@mixin` / `@include` / `@content` / `@if`.
 //!
-//! 每个目录是一份独立用例：`main.scss` 是入口，`main.css` 是 dart-sass 1.35.2 的
-//! expanded 产物（`scripts/style-diff/scss-oracle.cjs` 同款渲染），逐字节断言。
-//! 报错用例在 `fixtures-scss-s2-errors/`，断言文案与行列。
+//! Each directory is one independent case: `main.scss` is the entry and `main.css` is the
+//! dart-sass 1.35.2 expanded output (rendered by the same setup as
+//! `scripts/style-diff/scss-oracle.cjs`), asserted byte for byte. Error cases live in
+//! `fixtures-scss-s2-errors/`, asserting the message together with line and column.
 
 use std::path::Path;
 
@@ -31,20 +32,21 @@ fn scss_s2_fixtures_match_dart_sass_byte_for_byte() {
         let path = case.join("main.scss");
         let expected_path = case.join("main.css");
         let expected = std::fs::read_to_string(&expected_path)
-            .unwrap_or_else(|e| panic!("缺少期望产物 {}: {e}", expected_path.display()));
+            .unwrap_or_else(|e| panic!("missing expected output {}: {e}", expected_path.display()));
         let out = compile(&path).unwrap_or_else(|e| panic!("{}: {e:#}", path.display()));
         assert_eq!(
             out.css,
             expected,
-            "产物与 dart-sass 1.35.2 不一致: {}",
+            "output does not match dart-sass 1.35.2: {}",
             path.display()
         );
         checked += 1;
     }
-    assert!(checked >= 16, "S2 fixtures 数量异常: {checked}");
+    assert!(checked >= 16, "unexpected number of S2 fixtures: {checked}");
 }
 
-/// 命名空间 mixin 来自 `@use` 的模块，模块文件要登记进 deps。
+/// A namespaced mixin comes from a module loaded with `@use`, so the module file must be
+/// recorded in deps.
 #[test]
 fn scss_s2_namespace_include_records_dependency() {
     let out = compile(&fixture_root("fixtures-scss-s2").join("mixin-namespace/main.scss"))
@@ -76,7 +78,11 @@ fn scss_s2_error_fixtures_match_dart_sass() {
         let raw = std::fs::read_to_string(case.join("main.err")).expect("read main.err");
         let expected: serde_json::Value = serde_json::from_str(&raw).expect("parse main.err");
         let err = match compile(&path) {
-            Ok(out) => panic!("{} 应当报错，实际产出:\n{}", path.display(), out.css),
+            Ok(out) => panic!(
+                "{} should have failed, but produced:\n{}",
+                path.display(),
+                out.css
+            ),
             Err(e) => e,
         };
         assert_eq!(
@@ -88,21 +94,24 @@ fn scss_s2_error_fixtures_match_dart_sass() {
         assert_eq!(
             err.line,
             Some(expected["line"].as_u64().expect("line") as u32),
-            "{} 行号",
+            "{} line",
             path.display()
         );
         assert_eq!(
             err.column,
             Some(expected["column"].as_u64().expect("column") as u32),
-            "{} 列号",
+            "{} column",
             path.display()
         );
         checked += 1;
     }
-    assert!(checked >= 19, "S2 报错 fixtures 数量异常: {checked}");
+    assert!(
+        checked >= 19,
+        "unexpected number of S2 error fixtures: {checked}"
+    );
 }
 
-/// 递归 mixin 必须有明确上限，不能把栈打爆。
+/// A recursive mixin must have an explicit limit and must not blow the stack.
 #[test]
 fn scss_s2_recursion_limit_is_explicit() {
     let dir = std::env::temp_dir().join("minibuild-scss-s2-recursion");
@@ -113,7 +122,7 @@ fn scss_s2_recursion_limit_is_explicit() {
         "@mixin loop {\n  @include loop;\n}\n\n.a {\n  @include loop;\n}\n",
     )
     .expect("write");
-    let err = compile(&path).expect_err("应当报错");
+    let err = compile(&path).expect_err("should fail");
     assert!(
         err.message.contains("Mixin nesting depth exceeded"),
         "{}",

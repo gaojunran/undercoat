@@ -1,5 +1,5 @@
-// @extend 的单段扩展者：追加到前缀末尾（两个复合选择器并列 = 隐式后代组合符），
-// 不能因为「前缀相同」就去重成一条。
+// single-part extenders for @extend: appended to the end of the prefix (two adjacent compound selectors = an implicit descendant combinator),
+// must not be deduplicated into one just because the prefixes match.
 .paragraph {
   margin: 0 0 40rpx;
 }
@@ -17,7 +17,7 @@
   }
 }
 
-// 同一个复合选择器被多处 extend（顺序按 dart 的 `_trim`：后登记的在前）。
+// one compound selector extended from several places (ordered as dart's `_trim`: the later registration comes first).
 .a .b {
   x: 1;
 }

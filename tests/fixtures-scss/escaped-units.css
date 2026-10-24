@@ -1,5 +1,4 @@
-@charset "UTF-8";
-/* IE `\9` hack：单位/标识符是转义写出来的，序列化时必须补尾随空格 */
+/* IE `\9` hack: the unit/identifier is written as an escape, so a trailing space must be added when serializing */
 .a {
   margin-top: 1px\9 ;
 }

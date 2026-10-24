@@ -1,14 +1,14 @@
-/*! 语句级注释保留 */
+/*! statement-level comment preserved */
 .a { width: 1px /* tail */ }
 .b { width: 1px /* t */; color: red }
 .c { width: /* t */ 1px }
 .d { width: 1px /* t */ !important }
-.e { color: red; /* 语句级 */ }
+.e { color: red; /* statement-level */ }
 .f { /* c1 */ color: red; /* c2 */ }
 .g { /* only */ }
 .h { width: 1px/*tight*/; height: 2px/*a*/ /*b*/ }
 .i { --x: 1px /* t */ 2px }
 .j { font: 12px/1.5 /* t */ sans-serif }
-@media screen { .k { x: 1 /* t */ } /* 语句级 */ .l { y: 2 } }
-@keyframes k { from { opacity: 0 /* t */ } /* 语句级 */ to { opacity: 1 } }
+@media screen { .k { x: 1 /* t */ } /* statement-level */ .l { y: 2 } }
+@keyframes k { from { opacity: 0 /* t */ } /* statement-level */ to { opacity: 1 } }
 @font-face { font-family: X /* t */; src: url(a.woff) /* u */ }

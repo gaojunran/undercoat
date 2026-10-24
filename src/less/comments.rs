@@ -5,7 +5,7 @@ use super::Compiler;
 use super::Layer;
 use crate::doc::{Comment, Item};
 
-/// mixin 定义（含嵌套在别的 mixin 体里的）的块区间，用于把内部注释从根层摘除。
+/// Block spans of mixin definitions (including those nested in other mixin bodies), used to remove inner comments from the root level.
 pub(super) fn collect_definition_spans(stmts: &[Statement], out: &mut Vec<Span>) {
     for st in stmts {
         match st {
@@ -13,7 +13,7 @@ pub(super) fn collect_definition_spans(stmts: &[Statement], out: &mut Vec<Span>)
                 out.push(d.block.span);
                 collect_definition_spans(&d.block.statements, out);
             }
-            // detached ruleset 体内注释只在被调用时输出（each 则丢掉）
+            // Comments inside a detached ruleset body are emitted only when it is called (dropped for each)
             Statement::LessVariableDeclaration(d) => {
                 if let ComponentValue::LessDetachedRuleset(dr) = &d.value {
                     out.push(dr.block.span);
@@ -34,7 +34,7 @@ pub(super) fn collect_definition_spans(stmts: &[Statement], out: &mut Vec<Span>)
     }
 }
 
-/// 去掉文本里的块注释（用于 `@import` prelude：注释会被 less 移到语句外）。
+/// Removes block comments from the text (for `@import` preludes: less moves comments outside the statement).
 pub(super) fn strip_block_comments(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
     let mut cursor = 0;
@@ -49,7 +49,7 @@ pub(super) fn strip_block_comments(text: &str) -> String {
         .replace(" ,", ",")
 }
 
-/// 文本里的块注释区间（相对偏移）。
+/// Block comment spans in the text (relative offsets).
 pub(super) fn block_comments(text: &str) -> Vec<(usize, usize)> {
     let mut out = Vec::new();
     let bytes = text.as_bytes();
@@ -70,7 +70,7 @@ pub(super) fn block_comments(text: &str) -> Vec<(usize, usize)> {
     out
 }
 
-/// 规则头部（选择器/at-rule 名到 `{`）的区间：这里的注释被 less 丢掉。
+/// Span of a rule header (selector/at-rule name up to `{`): comments here are dropped by less.
 pub(super) fn child_header_span(st: &Statement) -> Option<Span> {
     match st {
         Statement::QualifiedRule(r) => Some(Span {
@@ -94,7 +94,7 @@ pub(super) fn child_block_span(st: &Statement) -> Option<Span> {
         Statement::QualifiedRule(r) => Some(r.block.span),
         Statement::LessConditionalQualifiedRule(r) => Some(r.block.span),
         Statement::LessMixinDefinition(d) => Some(d.block.span),
-        // detached ruleset 声明：体内的注释属于展开处，不属于外层块
+        // detached ruleset declaration: comments in the body belong to the expansion site, not the outer block
         Statement::LessVariableDeclaration(d) => match &d.value {
             ComponentValue::LessDetachedRuleset(dr) => Some(dr.block.span),
             _ => None,
@@ -106,7 +106,7 @@ pub(super) fn child_block_span(st: &Statement) -> Option<Span> {
 }
 
 impl<'a> Compiler<'a> {
-    /// mixin 体内的块注释（不含子块内部）；每次展开都重新输出（less 里注释是普通节点）。
+    /// Block comments in a mixin body (excluding nested blocks); re-emitted on every expansion (comments are ordinary nodes in less).
     pub(super) fn mixin_comments(&mut self, block: &'a SimpleBlock<'a>) -> Vec<Comment> {
         let children: Vec<Span> = block
             .statements
@@ -127,19 +127,19 @@ impl<'a> Compiler<'a> {
         out
     }
 
-    /// 本块归属的注释：落在 `block_span` 内、但不属于任何子块内部的块注释。
+    /// Comments owned by this block: block comments inside `block_span` but not inside any child block.
     ///
-    /// 收集时即标记为已输出，根层 flush 会跳过它们（避免重复）。
+    /// They are marked as emitted when collected, so the root-level flush skips them (avoiding duplicates).
     pub(super) fn own_comments(
         &mut self,
         block_span: Span,
         stmts: &'a [Statement<'a>],
     ) -> Vec<Comment> {
         let children: Vec<Span> = stmts.iter().filter_map(child_block_span).collect();
-        // 规则头部（选择器/at-rule 名到 `{`）里的注释：less 在 `selectors()` / `atrule()`
-        // 里清空 commentStore，直接丢掉。
+        // Comments in a rule header (selector/at-rule name up to `{`): less clears the
+        // commentStore in `selectors()` / `atrule()` and drops them.
         let headers: Vec<Span> = stmts.iter().filter_map(child_header_span).collect();
-        // 声明（含变量声明）整段里的注释属于该语句：值里的原位输出，名字段里的丢掉
+        // Comments in a whole declaration (including variable declarations) belong to that statement: emitted in place in the value, dropped in the name part
         let values: Vec<Span> = stmts
             .iter()
             .filter_map(|st| {
@@ -169,7 +169,7 @@ impl<'a> Compiler<'a> {
         out
     }
 
-    /// 值节点之后紧跟的块注释（同一语句内）：less 把注释当值列表的最后一个节点。
+    /// Block comment immediately following a value node (within the same statement): less treats comments as the last node of a value list.
     pub(super) fn trailing_comment(&self, end: usize) -> Option<String> {
         let rest = self.src.get(end..)?;
         let start = rest
@@ -181,7 +181,7 @@ impl<'a> Compiler<'a> {
         Some(tail[..close].to_string())
     }
 
-    /// 把区间内的块注释标为已输出（不归属任何位置时的丢弃/内联）。
+    /// Marks block comments inside the span as emitted (dropped/inlined when they belong to no position).
     pub(super) fn mark_comments(&mut self, span: Span) {
         for (i, &(start, _)) in self.comments.iter().enumerate() {
             if start >= span.start && start < span.end {
@@ -190,7 +190,7 @@ impl<'a> Compiler<'a> {
         }
     }
 
-    /// 取走所有 start < limit 的未输出块注释（保持源序）。
+    /// Takes every unemitted block comment with start < limit (preserving source order).
     pub(super) fn take_comments(&mut self, limit: usize) -> Vec<Comment> {
         let mut out = Vec::new();
         while self.comment_idx < self.comments.len() {
@@ -200,7 +200,7 @@ impl<'a> Compiler<'a> {
                 break;
             }
             self.comment_idx += 1;
-            // 定义体里的注释只在展开处输出（不能从根层冒出来）
+            // Comments inside definition bodies are emitted only at the expansion site (they must not surface from the root level)
             if self.comment_done[i]
                 || self
                     .def_spans
@@ -215,17 +215,17 @@ impl<'a> Compiler<'a> {
         out
     }
 
-    /// 直接写出所有 start < limit 的未输出块注释（顶层/规则间）。
+    /// Writes out every unemitted block comment with start < limit (top level / between rules).
     pub(super) fn flush_comments(&mut self, limit: usize, layer: &mut Layer) {
         for comment in self.take_comments(limit) {
             layer.items.push(Item::Comment(comment));
         }
     }
 
-    /// 一条块注释的 IR 形态：文本去掉 `/*` `*/`。
+    /// IR form of a block comment: the text with `/*` and `*/` removed.
     ///
-    /// less 侧按 [`Style::verbatim_comments`](crate::doc::Style) 原样回写，所以 `text`
-    /// 就是源码字节（含内部换行）；dart 侧才把它当待重排的内部文本。
+    /// The less side writes it back verbatim per [`Style::verbatim_comments`](crate::doc::Style), so `text`
+    /// is the raw source bytes (including internal newlines); only the dart side treats it as inner text to reflow.
     pub(super) fn comment(&self, start: usize, end: usize) -> Comment {
         let column = self.src[..start]
             .rfind('\n')

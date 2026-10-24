@@ -1,19 +1,22 @@
-//! undercoat：less / scss → CSS 的原生 Rust 编译器。
+//! undercoat: a native Rust compiler from less / scss → CSS.
 //!
-//! 解析复用 `oxc-css-parser`（产出带 span 的 AST），本 crate 负责 `@import` / `@use`
-//! 装配、求值、选择器展开与打印，不需要 Node 运行时。
+//! Parsing is delegated to `oxc-css-parser` (which produces a span-carrying AST); this
+//! crate handles `@import` / `@use` assembly, evaluation, selector expansion, and printing,
+//! with no Node runtime required.
 //!
-//! 两个方言共用一个输出中间表示与打印器，产物形态差异全部集中在 `doc::Style`；
-//! 求值核心各自独立（值模型不同，见 `docs/architecture.md`）。
+//! Both dialects share one output intermediate representation and printer; all output-shape
+//! differences live in `doc::Style`. The evaluation cores are independent (the value models
+//! differ; see `docs/architecture.md`).
 //!
-//! 对拍基线：less 4.1.3；scss 能力对齐 dart-sass 1.93.2，输出形态对齐 1.35.2。
+//! Conformance baseline: less 4.1.3; scss capabilities match dart-sass 1.93.2 and output
+//! shape matches 1.35.2.
 
 pub(crate) mod doc;
 mod error;
 pub(crate) mod less;
 pub(crate) mod merge;
 pub(crate) mod print;
-// 公开仅为测试钩子（`scss::indented`），产品 API 只有本文件下方 4 个符号。
+// Public only as a test hook (`scss::indented`); the product API is the 4 symbols below.
 #[doc(hidden)]
 pub mod scss;
 pub(crate) mod sourcemap;
@@ -23,40 +26,45 @@ use std::path::Path;
 
 pub use error::CompileError;
 
-/// 编译产物。
+/// Compilation output.
 #[derive(Debug, Default)]
 pub struct Output {
     pub css: String,
     pub map: Option<String>,
-    /// 依赖文件绝对路径（less `output.imports` / sass `stats.includedFiles` 语义）。
+    /// Absolute paths of dependency files (less `output.imports` / sass `stats.includedFiles`
+    /// semantics).
     pub deps: Vec<String>,
 }
 
-/// 编译选项。
+/// Compilation options.
 #[derive(Debug, Clone, Default)]
 pub struct Options {
-    /// `@import` 的额外查找根（绝对路径），两侧语义不同：
-    /// less 只当其是追加查找根（直接 `root.join(href)`，不补后缀）；
-    /// scss 则参与 dart 的完整候选枚举（`_partial` / 目录 index / 多后缀等）。
+    /// Extra lookup roots for `@import` (absolute paths), with different semantics per
+    /// dialect: less treats them purely as appended lookup roots (straight `root.join(href)`,
+    /// no suffix appended); scss feeds them into dart's full candidate enumeration
+    /// (`_partial` / directory index / multiple suffixes, etc.).
     pub paths: Vec<std::path::PathBuf>,
-    /// 是否产出 sourcemap。
+    /// Whether to emit a sourcemap.
     pub source_map: bool,
-    /// sourcemap `sources` 的基准目录（projectPath）：命中前缀则改写成相对形态。
+    /// Base directory for sourcemap `sources` (projectPath): when the prefix matches, rewrite
+    /// them to a relative form.
     pub project_root: Option<String>,
-    /// 方言专属选项。
+    /// Dialect-specific options.
     pub less: LessOptions,
 }
 
-/// less 通道专属选项（scss 通道不读）。
+/// Options specific to the less pipeline (the scss pipeline does not read them).
 #[derive(Debug, Clone, Default)]
 pub struct LessOptions {
-    /// less `globalVars`（useCompilerPlugins 二元组的 options）：只影响 less 通道。
+    /// less `globalVars` (the options of the useCompilerPlugins pairs): affects the less
+    /// pipeline only.
     pub global_vars: Vec<(String, String)>,
 }
 
-/// 行首偏移索引：字节 offset → (行, 列)，均 0-based（sourcemap v3 语义）。
+/// Line-start offset index: byte offset → (line, column), both 0-based (sourcemap v3
+/// semantics).
 ///
-/// 非产品 API，仅为测试/调试保留外部可见。
+/// Not a product API; kept externally visible only for tests/debugging.
 #[doc(hidden)]
 pub struct LineIndex {
     starts: Vec<usize>,
@@ -73,7 +81,8 @@ impl LineIndex {
         Self { starts }
     }
 
-    /// 字节偏移 → (0-based 行, 0-based 列)。列按 UTF-16 计算（sourcemap v3 要求）。
+    /// Byte offset → (0-based line, 0-based column). Columns are counted in UTF-16 units (as
+    /// sourcemap v3 requires).
     pub fn line_col(&self, offset: usize, src: &str) -> (u32, u32) {
         let line = match self.starts.binary_search(&offset) {
             Ok(l) => l,
@@ -86,7 +95,7 @@ impl LineIndex {
     }
 }
 
-/// 编译入口：按后缀分流。
+/// Compilation entry point: dispatches on the file extension.
 pub fn compile_file(path: &Path, source: &str, opts: &Options) -> Result<Output, CompileError> {
     let name = path.to_string_lossy();
     if name.ends_with(".less") {
@@ -96,9 +105,12 @@ pub fn compile_file(path: &Path, source: &str, opts: &Options) -> Result<Output,
         || name.ends_with(".css")
         || name.ends_with(".wxss")
     {
-        // `.sass` 与 `.scss` 同一条通道：缩进语法在 `scss::imports` 装载期折成等义 SCSS。
+        // `.sass` shares the `.scss` pipeline: the indented syntax is folded into equivalent
+        // SCSS during loading in `scss::imports`.
         scss::compile(path, source, opts).map_err(|e| *e)
     } else {
-        Err(CompileError::new(format!("不支持的样式后缀: {name}")))
+        Err(CompileError::new(format!(
+            "unsupported style extension: {name}"
+        )))
     }
 }

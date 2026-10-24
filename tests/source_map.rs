@@ -1,4 +1,4 @@
-//! `@import` 文本内联后的多源 sourcemap 断言。
+//! Multi-source sourcemap assertions after `@import` text inlining.
 
 use std::path::{Path, PathBuf};
 
@@ -9,7 +9,7 @@ const B64: &[u8; 64] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz012
 fn vlq(segment: &str) -> Vec<i64> {
     let (mut shift, mut value, mut out) = (0u32, i64::from(0), Vec::new());
     for ch in segment.bytes() {
-        let digit = B64.iter().position(|&b| b == ch).expect("vlq 字符") as i64;
+        let digit = B64.iter().position(|&b| b == ch).expect("vlq character") as i64;
         let cont = digit & 0x20 != 0;
         value |= (digit & 0x1f) << shift;
         shift += 5;
@@ -24,7 +24,7 @@ fn vlq(segment: &str) -> Vec<i64> {
     out
 }
 
-/// 解码 mappings：每行第一条映射的 `(source, line, col)`。
+/// Decode mappings: `(source, line, col)` of the first mapping on each line.
 fn line_mappings(map: &serde_json::Value) -> Vec<Option<(usize, u32, u32)>> {
     let (mut file, mut line, mut col) = (0i64, 0i64, 0i64);
     map["mappings"]
@@ -51,7 +51,7 @@ fn generated_line(css: &str, selector: &str) -> usize {
     let head = format!("{selector} {{");
     css.lines()
         .position(|l| l.starts_with(&head))
-        .unwrap_or_else(|| panic!("产物里没有 {selector}:\n{css}"))
+        .unwrap_or_else(|| panic!("no {selector} in the output:\n{css}"))
 }
 
 fn temp_dir(tag: &str) -> PathBuf {
@@ -88,17 +88,19 @@ fn compile(dir: &Path, entry: &str) -> (String, serde_json::Value) {
 #[test]
 fn extend_generated_selector_keeps_source_line() {
     let dir = temp_dir("extend-map");
-    // 多源（b.less 被内联）：extend 追加的选择器要映射回 b.less 的 extend 行
+    // Multiple sources (b.less is inlined): selectors appended by extend must map back
+    // to the extend line of b.less
     write(&dir, "main.less", "@import \"b.less\";\n");
     write(&dir, "b.less", ".a { color: red; }\n.b { &:extend(.a); }\n");
 
     let (css, map) = compile(&dir, "main.less");
     assert_eq!(css, ".a,\n.b {\n  color: red;\n}\n", "CSS = {css}");
     let mappings = line_mappings(&map);
-    // 原选择器位置不变
-    assert_eq!(mappings[0].expect("映射"), (1, 0, 0));
-    // `.b` 是 extend 追加出来的选择器，映射到含 `:extend` 的源行（b.less 0-based 第 1 行）。
-    assert_eq!(mappings[1].expect("映射"), (1, 1, 0));
+    // The original selector position is unchanged
+    assert_eq!(mappings[0].expect("mapping"), (1, 0, 0));
+    // `.b` is a selector appended by extend; it maps to the source line containing
+    // `:extend` (0-based line 1 of b.less).
+    assert_eq!(mappings[1].expect("mapping"), (1, 1, 0));
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -121,32 +123,42 @@ fn import_maps_back_to_each_source_file() {
         .iter()
         .map(|s| s.as_str().expect("source"))
         .collect();
-    assert_eq!(sources, ["main.less", "b.less", "c.less"], "按首次出现顺序");
+    assert_eq!(
+        sources,
+        ["main.less", "b.less", "c.less"],
+        "in order of first appearance"
+    );
 
     let contents = map["sourcesContent"].as_array().expect("sourcesContent");
     assert_eq!(contents.len(), sources.len());
-    assert!(contents[1].as_str().expect("b 原文").contains(".b1"));
+    assert!(contents[1].as_str().expect("b source").contains(".b1"));
 
     let mappings = line_mappings(&map);
-    let at = |selector: &str| mappings[generated_line(&css, selector)].expect("映射");
+    let at = |selector: &str| mappings[generated_line(&css, selector)].expect("mapping");
 
-    // 宿主文件规则仍在宿主坐标
+    // Rules from the host file stay in host coordinates
     assert_eq!(at(".a"), (0, 0, 0));
     assert_eq!(at(".c"), (0, 3, 0));
-    // 导入文件规则映射回导入文件自己的行（`.b1` 在 b.less 第 1 行）
+    // Rules from an imported file map back to that file's own lines (`.b1` is on
+    // line 1 of b.less)
     assert_eq!(at(".b1"), (1, 0, 0));
-    // 嵌套导入同理
+    // Nested imports behave the same
     assert_eq!(at(".c1"), (2, 0, 0));
-    // `(multiple)` 重复导入：两处 `.b1` 都映射到同一 source 的同一行
+    // `(multiple)` duplicate import: both `.b1` occurrences map to the same line of
+    // the same source
     let b1: Vec<usize> = css
         .lines()
         .enumerate()
         .filter(|(_, l)| l.starts_with(".b1"))
         .map(|(i, _)| i)
         .collect();
-    assert_eq!(b1.len(), 2, "产物应有两份 .b1:\n{css}");
+    assert_eq!(
+        b1.len(),
+        2,
+        "the output should contain two copies of .b1:\n{css}"
+    );
     for line in b1 {
-        assert_eq!(mappings[line].expect("映射"), (1, 0, 0));
+        assert_eq!(mappings[line].expect("mapping"), (1, 0, 0));
     }
 
     std::fs::remove_dir_all(&dir).ok();

@@ -1,13 +1,13 @@
-// (reference) 目标文件：规则默认不输出，只在被 mixin 调用 / extend 命中时产出
+// (reference) target file: rules are not emitted by default, only when a mixin call / extend hits them
 
-/* 顶层注释：被 extend 命中也不输出 */
+/* top-level comment: not emitted even when hit by extend */
 
 .ref-base {
   font-weight: bold;
 }
 
 .ref-multi {
-  /* 体内注释保留，且与声明紧凑拼接 */
+  /* comments in the body are kept and squeezed right against the declarations */
   a: 1;
   b: 2;
   c: 3;

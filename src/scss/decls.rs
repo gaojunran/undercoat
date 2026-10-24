@@ -1,11 +1,13 @@
-//! 声明与值：普通/嵌套/自定义属性、插值标识符、值文本边界。
+//! Declarations and values: plain/nested/custom properties, interpolated
+//! identifiers, value text boundaries.
 //!
-//! 由 `scss/mod.rs` 拆分而来（纯搬运）。
+//! Split out of `scss/mod.rs` (pure code move).
 
 use super::*;
 
 impl<'a> Converter<'a> {
-    /// 实参绑定：与 `@function` 共用同一套（`eval::Evaluator::bind`）。
+    /// Argument binding: shares the same implementation as `@function`
+    /// (`eval::Evaluator::bind`).
     pub(super) fn bind(
         &mut self,
         params: &[Param<'a>],
@@ -19,7 +21,8 @@ impl<'a> Converter<'a> {
             .map_err(|e| self.eval_err(e))
     }
 
-    /// 声明列表（`@font-face` / `@page` / keyframe 块）：声明 + 变量 + 允许的 mixin/控制流。
+    /// Declaration list (`@font-face` / `@page` / keyframe blocks): declarations +
+    /// variables + allowed mixins/control flow.
     pub(super) fn decl_list(
         &mut self,
         stmts: &'a [Statement<'a>],
@@ -41,7 +44,10 @@ impl<'a> Converter<'a> {
         self.decl_context = false;
         result?;
         if !nested.is_empty() {
-            return Err(self.err(end, "SCSS 特性尚未实现（S2）: 声明列表内的规则"));
+            return Err(self.err(
+                end,
+                "SCSS feature not implemented yet (S2): style rules inside a declaration list",
+            ));
         }
         Ok(out)
     }
@@ -53,7 +59,7 @@ impl<'a> Converter<'a> {
         if let Some(namespace) = &var.namespace {
             return Err(self.err(
                 namespace.span.start,
-                "SCSS 特性尚未实现（S2）: 命名空间变量声明",
+                "SCSS feature not implemented yet (S2): namespaced variable declaration",
             ));
         }
         let has = |name: &str| {
@@ -64,8 +70,10 @@ impl<'a> Converter<'a> {
         let name = var.name.name.name;
         let default = has("default");
         let global = has("global");
-        // `with` 配置只在模块全局层生效：配置值直接成为变量的初值（`!default`
-        // 声明的表达式不再求值）；非 `!default` 声明收到配置就是 dart 的报错。
+        // `with` configuration only takes effect at the module global level: the
+        // configured value becomes the variable's initial value directly (the
+        // expression of a `!default` declaration is no longer evaluated); a
+        // non-`!default` declaration receiving a configuration is an error in dart.
         if self.eval.at_module_global() {
             if !default {
                 if let Some(at) = self.eval.config_conflict(name) {
@@ -105,15 +113,19 @@ impl<'a> Converter<'a> {
             .as_ref()
             .map_or(decl.span.end, |important| important.span.start);
 
-        // dart 的「自定义属性」判定看**源码**里属性名是否以 `--` 开头：`#{$p}: $v`
-        // 里属性名是插值，所以 `$v` 仍按普通 SassScript 求值（bootstrap 的 `rfs()` 依赖它）。
-        // 看源码里属性名的开头是否有字面 `--`：`--#{$p}foo: .5` 也是自定义属性，
-        // 值按「字面文本 + 插值」处理（数字不会被重新格式化）。
+        // dart decides "custom property" by whether the property name in the
+        // **source** starts with `--`: in `#{$p}: $v` the name is an interpolation, so
+        // `$v` is still evaluated as ordinary SassScript (bootstrap's `rfs()` relies
+        // on it). We look for a literal `--` at the start of the source name:
+        // `--#{$p}foo: .5` is a custom property too, and its value is handled as
+        // "literal text + interpolation" (numbers are not reformatted).
         let custom = self.src()[name_span.start..].starts_with("--");
         let mut custom_strip = None;
         let mut value = if custom {
-            // dart 的自定义属性值一直读到 `;`（`!important` 也在原文里），空白在
-            // 解析期折叠，换行的重排交给序列化器（那里才知道输出层级）。
+            // dart reads a custom property value up to `;` (`!important` is part of the
+            // raw text); whitespace is collapsed at parse time and newline
+            // re-indentation is left to the serializer (only it knows the output
+            // nesting level).
             let end = match &decl.important {
                 Some(important) => self
                     .custom_raw_end(decl.colon_span.end)
@@ -147,7 +159,8 @@ impl<'a> Converter<'a> {
         }))
     }
 
-    /// 普通声明的值文本；`null` 或序列化后为空时返回 `None`（整条丢弃）。
+    /// Value text of an ordinary declaration; returns `None` when the value is
+    /// `null` or serializes to empty (the whole declaration is dropped).
     fn decl_value_text(
         &mut self,
         components: &[ComponentValue<'a>],
@@ -158,20 +171,23 @@ impl<'a> Converter<'a> {
             .eval_value(self.src(), components)
             .map_err(|e| self.eval_err(e))?;
         if value.is_null() {
-            // dart-sass: null 值的声明整条丢弃。
+            // dart-sass: a declaration whose value is null is dropped entirely.
             return Ok(None);
         }
         let text = value.to_css().map_err(|message| {
             self.err(components.first().map_or(at, |v| v.span().start), message)
         })?;
-        // 值序列化为空（`a: #{$null}`）时整条声明丢弃；尾部空白也去掉
-        // （dart 的 `1 #{$null}` 输出 `1`）。十六进制转义的终止空格要保留
-        // （`1px\0 `），否则 `\0` 会和后面的字符黏连成另一个码位。
+        // A value that serializes to empty (`a: #{$null}`) drops the whole
+        // declaration; trailing whitespace is removed as well (dart's `1 #{$null}`
+        // outputs `1`). The terminator space of a hexadecimal escape must be kept
+        // (`1px\0 `), otherwise `\0` would glue to the following characters into
+        // another code point.
         let text = trim_value_end(&text);
         Ok((!text.is_empty()).then(|| text.to_string()))
     }
 
-    /// 嵌套属性（`font: { family: serif }`）里的属性名带上前缀：`font-family`。
+    /// Prefix the property name inside a nested property (`font: { family: serif }`):
+    /// `font-family`.
     fn prefixed_name(&self, name: String) -> String {
         match &self.decl_prefix {
             Some(prefix) => format!("{prefix}-{name}"),
@@ -179,7 +195,8 @@ impl<'a> Converter<'a> {
         }
     }
 
-    /// 嵌套属性块：外层声明（有值时）+ 按前缀展开的子声明。
+    /// Nested property block: the outer declaration (when it has a value) plus the
+    /// child declarations expanded with the prefix.
     pub(super) fn nested_decl(
         &mut self,
         decl: &'a Declaration<'a>,
@@ -232,7 +249,7 @@ impl<'a> Converter<'a> {
         result
     }
 
-    /// 属性名：支持 `#{}` 插值（`border-#{$side}`）。
+    /// Property name: supports `#{}` interpolation (`border-#{$side}`).
     fn decl_name(&mut self, name: &InterpolableIdent<'a>) -> Result<String, Box<CompileError>> {
         match name {
             InterpolableIdent::Literal(ident) => Ok(ident.name.to_string()),
@@ -253,9 +270,10 @@ impl<'a> Converter<'a> {
                             );
                         }
                         SassInterpolatedIdentElement::Placeholder(_) => {
-                            return Err(
-                                self.err(interp.span.start, "SCSS 特性尚未实现（S1）: 模板占位符")
-                            );
+                            return Err(self.err(
+                                interp.span.start,
+                                "SCSS feature not implemented yet (S1): template placeholder",
+                            ));
                         }
                     }
                 }
@@ -264,17 +282,18 @@ impl<'a> Converter<'a> {
             other => Err(self.err(
                 ident_span(other).start,
                 format!(
-                    "SCSS 特性尚未实现（S1）: {}",
+                    "SCSS feature not implemented yet (S1): {}",
                     snippet(self.src(), ident_span(other).start, ident_span(other).end)
                 ),
             )),
         }
     }
 
-    /// 声明的「区间」终点：值之后到 `;`（含）或 `}`（不含）。
+    /// End of the declaration "region": from after the value up to `;` (inclusive) or
+    /// `}` (exclusive).
     ///
-    /// 落在区间内的块注释属于声明内部，dart-sass 整段丢弃；只有 `;` 之后的
-    /// 才是语句级注释。
+    /// A block comment inside the region belongs to the declaration and dart-sass
+    /// drops it entirely; only one after `;` is a statement-level comment.
     pub(super) fn decl_region_end(&self, from: usize) -> Span {
         let bytes = self.src().as_bytes();
         let mut i = from;
@@ -319,7 +338,8 @@ impl<'a> Converter<'a> {
         }
     }
 
-    /// 自定义属性值的原文终点：顶层 `;` 或 `}`（字符串/括号内不算）。
+    /// End of the raw custom property value: a top-level `;` or `}` (not inside
+    /// strings or brackets).
     fn custom_raw_end(&self, start: usize) -> usize {
         let bytes = self.src().as_bytes();
         let mut depth = 0usize;
@@ -356,9 +376,11 @@ impl<'a> Converter<'a> {
         bytes.len()
     }
 
-    /// 自定义属性值：按 dart 解析期的空白规则折叠（空白游程压成游程的**最后一个
-    /// 字符**、连续换行压成一个、换行后的缩进原样保留），字符串归一双引号，`#{}`
-    /// 求值。返回折叠后的文本与换行重排参数。
+    /// Custom property value: collapsed following dart's parse-time whitespace rules
+    /// (a whitespace run collapses to the **last character** of the run, consecutive
+    /// newlines collapse into one, indentation after a newline is kept verbatim),
+    /// strings are normalized to double quotes, and `#{}` is evaluated. Returns the
+    /// collapsed text and the newline re-indentation parameters.
     fn custom_value(
         &mut self,
         from: usize,
@@ -373,7 +395,8 @@ impl<'a> Converter<'a> {
         while i < chars.len() {
             let (byte, ch) = chars[i];
             match ch {
-                // 转义原样带过（含十六进制转义的终止空格）。
+                // Escapes are passed through verbatim (including the terminator space
+                // of a hexadecimal escape).
                 '\\' => {
                     out.push(ch);
                     if let Some(&(_, next)) = chars.get(i + 1) {
@@ -417,10 +440,13 @@ impl<'a> Converter<'a> {
                     wrote_newline = false;
                     i = j + 1;
                 }
-                // 空白游程压成**游程的最后一个字符**（tab 结尾就留 tab，不是统一变空格）；
-                // 换行后的缩进整段保留，交给序列化期重排（dart 靠它做字符平移）。
-                // 对齐 dart 的 `_interpolatedDeclarationValue`：只有「刚写过换行」或
-                // 「下一个字符不是空白」时才写出当前字符。
+                // A whitespace run collapses to the **last character** of the run (a run
+                // ending in a tab keeps the tab instead of normalizing to a space); the
+                // indentation after a newline is kept whole and left to serialization to
+                // re-indent (dart relies on it for character shifting). This matches
+                // dart's `_interpolatedDeclarationValue`: the current character is only
+                // written when a newline was just written or when the next character is
+                // not whitespace.
                 ' ' | '\t' => {
                     let next_ws = chars
                         .get(i + 1)
@@ -448,7 +474,8 @@ impl<'a> Converter<'a> {
         Ok((out, strip))
     }
 
-    /// 字符串体（含 `#{}`）求值：值段解转义，插值段求值后拼接。
+    /// Evaluate a string body (including `#{}`): escapes in the value segments are
+    /// decoded, interpolations are evaluated and then appended.
     fn interpolated_string(&mut self, inner: &str, offset: usize) -> Result<String, EvalError> {
         let mut out = String::new();
         let mut pos = 0;
@@ -465,7 +492,8 @@ impl<'a> Converter<'a> {
     }
 }
 
-/// dart 的 `_writeReindentedValue` 三个分支：无换行 / 只有尾部空白 / 按缩进重排。
+/// The three branches of dart's `_writeReindentedValue`: no newline / only trailing
+/// whitespace / re-indent by indentation.
 fn custom_strip(text: &str, column: usize) -> Option<CustomStrip> {
     if !text.contains('\n') {
         return None;
@@ -484,7 +512,7 @@ fn custom_strip(text: &str, column: usize) -> Option<CustomStrip> {
     })
 }
 
-/// 标识符的静态文本（插值/占位符返回 `None`）。
+/// Static text of an identifier (interpolations/placeholders return `None`).
 pub(super) fn ident_name<'a>(ident: &'a InterpolableIdent<'a>) -> Option<&'a str> {
     match ident {
         InterpolableIdent::Literal(i) => Some(i.name),
@@ -501,15 +529,16 @@ fn ident_span(ident: &InterpolableIdent) -> Span {
     }
 }
 
-/// 用给定 prelude 把一段内容重新包回 `@media`。
-/// 去掉值尾部的空白，但保留十六进制转义的终止空格。
+/// Re-wrap a piece of content back into `@media` with the given prelude.
+/// Strip trailing whitespace from the value, but keep the terminator space of a
+/// hexadecimal escape.
 fn trim_value_end(text: &str) -> &str {
     let trimmed = text.trim_end();
     if trimmed.len() == text.len() {
         return text;
     }
     let bytes = trimmed.as_bytes();
-    // 结尾形如 `\<1..6 位十六进制>`：dart 一定补一个空格断句。
+    // Ends like `\<1..6 hex digits>`: dart always appends a space to terminate it.
     let mut i = bytes.len();
     while i > 0 && bytes[i - 1].is_ascii_hexdigit() {
         i -= 1;

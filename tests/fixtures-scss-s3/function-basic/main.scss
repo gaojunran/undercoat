@@ -1,4 +1,4 @@
-// @function 定义 / 参数绑定 / 默认值引用前参 / 关键字实参 / 任意返回值。
+// @function definitions / parameter binding / defaults referring to earlier parameters / keyword arguments / arbitrary return values.
 @function spacing($multiplier, $base: $multiplier * 4px) {
   @return $base * $multiplier;
 }

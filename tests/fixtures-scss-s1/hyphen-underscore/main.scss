@@ -1,4 +1,4 @@
-// `-` 与 `_` 在变量/函数名里完全等价（命名空间不归一）
+// `-` and `_` are fully equivalent in variable/function names (namespaces are not normalized)
 @use "theme";
 
 $base_size: 10px !default;
