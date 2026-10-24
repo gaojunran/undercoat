@@ -29,14 +29,14 @@
 
 ## 产物形态差异：全部在 `Style`
 
-```
-blank_line_after_rule        less=false  sass=true    规则之间是否空行
-indent_selector_continuation less=true   sass=false   选择器续行是否缩进（dart 写在第 0 列）
-charset                      less=false  sass=true    非 ASCII 内容是否补 @charset
-trailing_newline             less=true   sass=false   产物末尾是否换行（CLI 侧另补）
-sources_content              less=按多源  sass=true    map 是否内嵌源文本
-verbatim_comments            less=true   sass=false   注释是否原样回写（dart 会重排续行缩进）
-```
+| 字段 | less | sass | 含义 |
+| --- | --- | --- | --- |
+| `blank_line_after_rule` | false | true | 规则之间是否空行 |
+| `indent_selector_continuation` | true | false | 选择器续行是否缩进（dart 写在第 0 列） |
+| `charset` | false | true | 非 ASCII 内容是否补 `@charset` |
+| `trailing_newline` | true | false | 产物末尾是否换行（CLI 侧另补） |
+| `sources_content` | 按多源 | true | map 是否内嵌源文本 |
+| `verbatim_comments` | true | false | 注释是否原样回写（dart 会重排续行缩进） |
 
 `doc::Item::Raw` 是唯一的逃生舱，只给「本来就是任意 CSS 文本」的东西用；哪四类、为什么
 不能用结构化节点表达，见 [pipeline.md](pipeline.md) 的 IR 一节。
