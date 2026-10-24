@@ -1,0 +1,81 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="940" height="942" viewBox="0 0 940 942" font-family="PingFang SC, Microsoft YaHei, system-ui, sans-serif" role="img" aria-labelledby="title desc">
+  <title id="title">undercoat 编译流水线</title>
+  <desc id="desc">从源文件到 CSS 字节的六个阶段；只有求值一段按 less / scss 分叉，所有 Span 都是合并串坐标。</desc>
+
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#8c959f"/>
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="940" height="942" fill="#ffffff"/>
+
+  <text x="32" y="46" font-size="19" font-weight="600" fill="#1f2328">编译流水线</text>
+  <text x="32" y="70" font-size="13" fill="#59636e">一个入口文件进来，出去的是 CSS 字节；只有第 ③ 段按方言分叉。</text>
+  <line x1="32" y1="82" x2="908" y2="82" stroke="#d8dee4" stroke-width="1"/>
+
+  <rect x="400" y="92" width="140" height="40" rx="8" fill="#ffffff" stroke="#afb8c1" stroke-width="1"/>
+  <text x="470" y="118" font-size="14" font-weight="600" fill="#1f2328" text-anchor="middle">源文件</text>
+
+  <path d="M470 132 V154" fill="none" stroke="#8c959f" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <rect x="150" y="154" width="640" height="60" rx="8" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1"/>
+  <text x="470" y="178" font-size="14" text-anchor="middle" fill="#1f2328"><tspan fill="#0969da" font-weight="700">①</tspan><tspan xml:space="preserve" font-weight="600"> 装配 merge::Merged</tspan></text>
+  <text x="470" y="198" font-size="13" fill="#59636e" text-anchor="middle">合并串 + 偏移段表 Seg（start / end / file / orig）</text>
+
+  <path d="M470 214 V236" fill="none" stroke="#8c959f" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <rect x="150" y="236" width="640" height="60" rx="8" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1"/>
+  <text x="470" y="260" font-size="14" text-anchor="middle" fill="#1f2328"><tspan fill="#0969da" font-weight="700">②</tspan><tspan xml:space="preserve" font-weight="600"> 解析 oxc-css-parser</tspan></text>
+  <text x="470" y="280" font-size="13" fill="#59636e" text-anchor="middle">只做词法与语法，产出带 Span 的 AST</text>
+
+  <path d="M470 296 V318" fill="none" stroke="#8c959f" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <rect x="150" y="318" width="640" height="60" rx="8" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1"/>
+  <text x="470" y="342" font-size="14" text-anchor="middle" fill="#1f2328"><tspan fill="#0969da" font-weight="700">③</tspan><tspan xml:space="preserve" font-weight="600"> 求值</tspan></text>
+  <text x="470" y="362" font-size="13" fill="#59636e" text-anchor="middle">唯一真正方言相关的一步，下方分叉</text>
+
+  <path d="M470 378 V398 H305 V418" fill="none" stroke="#8c959f" stroke-width="1.4"/>
+  <path d="M470 378 V398 H635 V418" fill="none" stroke="#8c959f" stroke-width="1.4"/>
+
+  <rect x="155" y="418" width="300" height="76" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1" stroke-dasharray="5 4"/>
+  <text x="305" y="442" font-size="14" font-weight="600" fill="#1f2328" text-anchor="middle">less：边遍历边求值</text>
+  <text x="305" y="462" font-size="13" fill="#59636e" text-anchor="middle">值 = CSS 文本 + 惰性绑定</text>
+  <text x="305" y="482" font-size="13" fill="#0969da" text-anchor="middle">less::Compiler</text>
+
+  <rect x="485" y="418" width="300" height="76" rx="8" fill="#ffffff" stroke="#d0d7de" stroke-width="1" stroke-dasharray="5 4"/>
+  <text x="635" y="442" font-size="14" font-weight="600" fill="#1f2328" text-anchor="middle">scss：求值成带类型的 Value</text>
+  <text x="635" y="462" font-size="13" fill="#59636e" text-anchor="middle">值 = 带类型的 SassScript 值</text>
+  <text x="635" y="482" font-size="13" fill="#0969da" text-anchor="middle">scss::Converter</text>
+
+  <path d="M305 494 V510 H470" fill="none" stroke="#8c959f" stroke-width="1.4"/>
+  <path d="M635 494 V510 H470" fill="none" stroke="#8c959f" stroke-width="1.4"/>
+  <path d="M470 510 V528" fill="none" stroke="#8c959f" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <rect x="150" y="528" width="640" height="80" rx="8" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1"/>
+  <text x="470" y="552" font-size="14" text-anchor="middle" fill="#1f2328"><tspan fill="#0969da" font-weight="700">④</tspan><tspan xml:space="preserve" font-weight="600"> doc::Item IR</tspan></text>
+  <text x="470" y="572" font-size="13" fill="#59636e" text-anchor="middle">Rule / AtRule / Decl / Comment / Keyframe</text>
+  <text x="470" y="592" font-size="13" fill="#59636e" text-anchor="middle">每个节点带源 Span；选择器按输出行拆开成 (行文本, Span)</text>
+
+  <path d="M470 608 V630" fill="none" stroke="#8c959f" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <rect x="150" y="630" width="640" height="60" rx="8" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1"/>
+  <text x="470" y="654" font-size="14" text-anchor="middle" fill="#1f2328"><tspan fill="#0969da" font-weight="700">⑤</tspan><tspan xml:space="preserve" font-weight="600"> doc::print（Style 参数化）</tspan></text>
+  <text x="470" y="674" font-size="13" fill="#59636e" text-anchor="middle">只追加：token 带 span，生成物走 raw</text>
+
+  <path d="M470 690 V712" fill="none" stroke="#8c959f" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <rect x="150" y="712" width="640" height="60" rx="8" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1"/>
+  <text x="470" y="736" font-size="14" text-anchor="middle" fill="#1f2328"><tspan fill="#0969da" font-weight="700">⑥</tspan><tspan xml:space="preserve" font-weight="600"> print::Printer + sourcemap.rs</tspan></text>
+  <text x="470" y="756" font-size="13" fill="#59636e" text-anchor="middle">逐条经段表换回文件，再 VLQ 编码</text>
+
+  <path d="M470 772 V794" fill="none" stroke="#8c959f" stroke-width="1.4" marker-end="url(#arrow)"/>
+
+  <rect x="370" y="794" width="200" height="40" rx="8" fill="#f6f8fa" stroke="#d0d7de" stroke-width="1"/>
+  <text x="470" y="820" font-size="14" font-weight="600" fill="#1f2328" text-anchor="middle">CSS 字节 + .map</text>
+
+  <rect x="120" y="862" width="700" height="56" rx="6" fill="#f6f8fa"/>
+  <rect x="120" y="862" width="3" height="56" rx="1.5" fill="#0969da"/>
+  <text x="142" y="884" font-size="13" font-weight="600" fill="#1f2328">注：所有 Span 都是合并串坐标。</text>
+  <text x="142" y="904" font-size="13" fill="#59636e">出错与 sourcemap 都要经段表换回「文件 + 行列」。</text>
+</svg>

@@ -76,6 +76,7 @@ src/                  the library (one module per concept, shared across dialect
   scss/               SCSS front end: decls, flow, module_use, selector, prelude, emit
 tests/                golden / conformance / source-map suites
 docs/architecture.md  module responsibilities and the boundaries between dialects
+docs/pipeline.md      the six stages from source text to CSS bytes, with code locations
 tools/undercoat-diff  semantic CSS comparator used for conformance runs
 ```
 
