@@ -92,4 +92,4 @@ that need it take a directory via environment variable (for example
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/gaojunran/undercoat/blob/main/LICENSE).
