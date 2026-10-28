@@ -40,9 +40,10 @@ pub struct Output {
 #[derive(Debug, Clone, Default)]
 pub struct Options {
     /// Extra lookup roots for `@import` (absolute paths), with different semantics per
-    /// dialect: less treats them purely as appended lookup roots (straight `root.join(href)`,
-    /// no suffix appended); scss feeds them into dart's full candidate enumeration
-    /// (`_partial` / directory index / multiple suffixes, etc.).
+    /// dialect: less follows `file-manager`'s `[""]` + `paths` order, each entry joined via
+    /// node's `path.join(root, href)` (a leading `/` in `href` does not discard `root`) and
+    /// suffixed with `.less` when the href has no extension; scss feeds them into dart's full
+    /// candidate enumeration (`_partial` / directory index / multiple suffixes, etc.).
     pub paths: Vec<std::path::PathBuf>,
     /// Whether to emit a sourcemap.
     pub source_map: bool,

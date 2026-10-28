@@ -353,12 +353,30 @@ pub(super) fn is_css_path(path: &str) -> bool {
     })
 }
 
+/// Node's `path.join(base, href)` semantics: a leading `/` in `href` does not discard `base`.
+///
+/// less resolves through `[""] + paths`, joining every entry as `path.join(root, "/x")`,
+/// so `/x` means "x under that root". The std `Path::join` replaces `base` wholesale when
+/// `href` is absolute, which is not the same thing.
+fn join_under(base: &Path, href: &str) -> PathBuf {
+    if base.as_os_str().is_empty() {
+        return PathBuf::from(href);
+    }
+    base.join(href.trim_start_matches('/'))
+}
+
 pub(super) fn resolve_import(base: &Path, href: &str, opts: &Options) -> Option<PathBuf> {
+    let with_ext = Path::new(href).extension().is_none();
     let mut candidates = vec![base.join(href)];
-    if Path::new(href).extension().is_none() {
+    if with_ext {
         candidates.push(base.join(format!("{href}.less")));
     }
-    candidates.extend(opts.paths.iter().map(|p| Path::new(p).join(href)));
+    for root in &opts.paths {
+        candidates.push(join_under(root, href));
+        if with_ext {
+            candidates.push(join_under(root, &format!("{href}.less")));
+        }
+    }
     candidates.into_iter().find(|p| p.is_file())
 }
 
@@ -387,10 +405,17 @@ impl<'a> Compiler<'a> {
                 }
             }
         }
-        for p in &self.options.paths {
-            let c = Path::new(p).join(href);
+        let with_ext = Path::new(href).extension().is_none();
+        for root in &self.options.paths {
+            let c = join_under(root, href);
             if c.is_file() {
                 return Some(c);
+            }
+            if with_ext {
+                let c = join_under(root, &format!("{href}.less"));
+                if c.is_file() {
+                    return Some(c);
+                }
             }
         }
         None
